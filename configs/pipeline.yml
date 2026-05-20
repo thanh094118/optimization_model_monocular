@@ -1,0 +1,90 @@
+runtime:
+  stage: all
+  clean_output: true
+  verbose: true
+
+paths:
+  cam1_pkl: "5/wham_opencap_1.pkl"
+  cam2_pkl: "5/wham_opencap_2.pkl"
+
+  smpl_model: "SMPL_NEUTRAL.pkl"
+  segmentation: "smpl_partSegmentation_mapping.pkl"
+
+  pose_output_dir: "output/pose_jsons"
+  fused_output_dir: "output/fused_jsons"
+  learnable_output_dir: "output/learnable_results"
+  visualization_output_dir: "output/visualization"
+
+  debug1_dir: "output/debug1"
+  debug2_dir: "output/debug2"
+
+  camera1_video: ""
+  camera2_video: ""
+
+pose_export:
+  enabled: true
+  target_fps: 60
+  max_sync_offset: 40
+  min_overlap: 8
+  min_improvement_ratio: 0.05
+
+fusion:
+  enabled: true
+
+  occlusion:
+    enabled: true
+    tau: 0.01
+
+  ransac:
+    threshold: 0.05
+    max_combos: 500
+
+  optimization:
+    regularization: true
+    regularization_lambda: 1.0
+    temporal_lambda: 2.0
+    max_iter: 1000
+
+  debug:
+    save_debug1: true
+    save_debug2: false
+
+learnable:
+  enabled: true
+  checkpoint: "real_best_ckpt.pth"
+  lr: 0.03
+  iterations: 80
+  pose_prior_weight: 0.05
+  trans_prior_weight: 0.05
+
+visualization:
+  enabled: true
+  target_fps: 10
+  dpi: 100
+  max_frames: null
+  video_search_dir: "."
+  cameras:
+    - camera1
+    - camera2
+
+refirement:
+  enabled: false
+
+  data_dir: "input"
+  wham_file: "wham_opencap_1.pkl"
+  video: "input/8.mp4"
+  intrinsics: "input/cameraIntrinsics.pickle"
+  subject_params: "input/subject_params.txt"
+  parameters_yaml: "configs/parameters.yaml"
+
+  activity: "sts"
+  rotation: 90
+
+  use_gpu: true
+  static_cam: true
+  n_iter_opt2: 75
+  filter_freq: 6
+  smoothness_diff_n: 1
+  print_loss_terms: false
+  plotting: false
+  save_smpl_for_viz: true
