@@ -4,11 +4,11 @@ runtime:
   verbose: true
 
 paths:
-  cam1_pkl: "5/wham_opencap_1.pkl"
-  cam2_pkl: "5/wham_opencap_2.pkl"
+  cam1_pkl: "input/wham_opencap_1.pkl"
+  cam2_pkl: "input/wham_opencap_2.pkl"
 
-  smpl_model: "SMPL_NEUTRAL.pkl"
-  segmentation: "smpl_partSegmentation_mapping.pkl"
+  smpl_model: "models/SMPL_NEUTRAL.pkl"
+  segmentation: "models/smpl_partSegmentation_mapping.pkl"
 
   pose_output_dir: "output/pose_jsons"
   fused_output_dir: "output/fused_jsons"
@@ -18,8 +18,8 @@ paths:
   debug1_dir: "output/debug1"
   debug2_dir: "output/debug2"
 
-  camera1_video: ""
-  camera2_video: ""
+  camera1_video: "input/video_2.mp4"
+  camera2_video: "input/video_8.mp4"
 
 pose_export:
   enabled: true
@@ -47,11 +47,11 @@ fusion:
 
   debug:
     save_debug1: true
-    save_debug2: false
+    save_debug2: true
 
 learnable:
   enabled: true
-  checkpoint: "real_best_ckpt.pth"
+  checkpoint: "models/real_best_ckpt.pth"
   lr: 0.03
   iterations: 80
   pose_prior_weight: 0.05
@@ -72,7 +72,7 @@ refirement:
 
   data_dir: "input"
   wham_file: "wham_opencap_1.pkl"
-  video: "input/8.mp4"
+  video: "input/video_2.mp4"
   intrinsics: "input/cameraIntrinsics.pickle"
   subject_params: "input/subject_params.txt"
   parameters_yaml: "configs/parameters.yaml"

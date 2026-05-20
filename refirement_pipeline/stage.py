@@ -49,7 +49,7 @@ def run_refirement_optimization(config):
     cfg = config.get("refirement", {})
 
     if not cfg.get("enabled", False):
-        logger.warning("refirement.enabled=false, but stage refirement was requested.")
+        logger.info("Running refirement because stage was explicitly requested.")
 
     external = _load_external_modules(cfg.get("external_repo_root", "refirement"))
 

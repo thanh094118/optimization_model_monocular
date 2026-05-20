@@ -9,3 +9,7 @@ matplotlib
 opencv-python
 gdown
 loguru
+trimesh
+python-decouple
+kornia==0.8.2
+-e ./slahmr

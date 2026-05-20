@@ -1,16 +1,27 @@
 import argparse
-from compat import patch_numpy_and_inspect, configure_stdout_encoding
+
+from compat import configure_stdout_encoding, patch_numpy_and_inspect
 from config_loader import load_config
 from pipeline import run_pipeline
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Pose + Fusion + Learnable-SMPLify Pipeline")
-    parser.add_argument("--config", required=True, help="Path to YAML config file")
+    parser = argparse.ArgumentParser(description="Motion Pipeline")
+    parser.add_argument("--config", required=True, help="Path to pipeline YAML config")
     parser.add_argument(
         "--stage",
-        choices=["all", "pose", "fusion", "learnable", "pose_fusion"],
         default=None,
+        choices=[
+            "all",
+            "pose",
+            "fusion",
+            "learnable",
+            "visualization",
+            "pose_fusion",
+            "postprocess",
+            "learnable_visualization",
+            "refirement",
+        ],
         help="Override runtime.stage in YAML",
     )
     return parser.parse_args()
@@ -19,10 +30,13 @@ def parse_args():
 def main():
     configure_stdout_encoding()
     patch_numpy_and_inspect()
+
     args = parse_args()
     config = load_config(args.config)
+
     if args.stage:
-        config.setdefault("runtime", {})["stage"] = args.stage
+        config["runtime"]["stage"] = args.stage
+
     run_pipeline(config)
 
 
