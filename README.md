@@ -8,6 +8,13 @@ mô tả: cài dependent + tải file cần thiết + data để chạy demo
 chạy flow mặc định:  
 - python main.py --config configs/pipeline.yml
 chạy từng pipeline
-- python main.py --config configs/pipeline.yml  
-
-- 
+- python main.py --config configs/pipeline.yml  --stage u_choice  
+các option hỗ trợ:  
+            "all",  
+            "pose",  
+            "fusion",  
+            "learnable",  
+            "visualization",  
+            "pose_fusion",  
+            "postprocess",  
+            "refirement",  
