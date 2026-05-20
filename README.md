@@ -4,8 +4,9 @@ Input là 2 file .pkl từ wham/wham_opencap
 chmod +x setup.sh  
 ./setup.sh  
 mô tả: cài dependent + tải file cần thiết + data để chạy demo  
-$ **cách chạy**  
-chạy flow mặc định:  
+# **cách chạy**  
+B1: cấu hình path; input; parameter trong configs/pipeline.yml  
+B2: chạy flow mặc định:  
 - python main.py --config configs/pipeline.yml
 chạy từng pipeline
 - python main.py --config configs/pipeline.yml  --stage u_option   
