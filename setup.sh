@@ -44,9 +44,6 @@ echo "========================================"
 echo "2. TẢI VÀ CHUẨN BỊ DỮ LIỆU"
 echo "========================================"
 
-echo "Tạo cấu trúc thư mục dữ liệu..."
-mkdir -p models input 5 videos
-
 declare -A FILE_IDS=(
     ["models/SMPL_NEUTRAL.pkl"]="1rg2QnvmMgoS7Cpok3X0RIie3ZVwW_c0U"
     ["input/cameraIntrinsics.pickle"]="1Lhg4qY8GEg4V6ZE8nK4rD7mP4PAbE9DS"

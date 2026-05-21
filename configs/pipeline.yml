@@ -86,5 +86,5 @@ refirement:
   filter_freq: 6
   smoothness_diff_n: 1
   print_loss_terms: false
-  plotting: false
+  plotting: true
   save_smpl_for_viz: true
