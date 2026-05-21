@@ -9,11 +9,13 @@ paths:
 
   smpl_model: "models/SMPL_NEUTRAL.pkl"
   segmentation: "models/smpl_partSegmentation_mapping.pkl"
+  j_regressor_body25: "models/J_regressor_body25.npy"
 
-  pose_output_dir: "output/pose_jsons"
-  fused_output_dir: "output/fused_jsons"
+  pose_output_dir: "output/pose_results"
+  fused_output_dir: "output/fused_results"
   learnable_output_dir: "output/learnable_results"
-  visualization_output_dir: "output/visualization"
+  visualization_output_dir: "output/visualize_results"
+  refirement_output_dir: "output/refirement_results"
 
   debug1_dir: "output/debug1"
   debug2_dir: "output/debug2"
@@ -51,7 +53,8 @@ fusion:
 
 learnable:
   enabled: true
-  checkpoint: "models/real_best_ckpt.pth"
+  # checkpoint: "models/real_best_ckpt.pth"
+  checkpoint: "models/best_ckpt.pth.tar"
   lr: 0.03
   iterations: 80
   pose_prior_weight: 0.05

@@ -53,6 +53,7 @@ def validate_config(config):
         "fused_output_dir",
         "learnable_output_dir",
         "visualization_output_dir",
+        "refirement_output_dir",
     ]
 
     for key in required_paths:

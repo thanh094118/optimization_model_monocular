@@ -30,12 +30,6 @@ from slahmr.slahmr.util.loaders import load_smpl_body_model
 # )  # use SMPLX b/c we have the mapping to openpose joints
 
 
-class TrajectoryTooShortForFilteringError(ValueError):
-    """Raised when a trajectory is too short for zero-phase Butterworth filtering."""
-
-    pass
-
-
 def _min_samples_for_filtfilt(order, cutoff_freq, sampling_rate):
     """Return the minimum number of samples required by scipy.signal.filtfilt."""
     b, a = butter(N=order / 2, Wn=cutoff_freq / (0.5 * sampling_rate), btype="low")

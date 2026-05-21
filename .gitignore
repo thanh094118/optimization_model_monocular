@@ -1,12 +1,14 @@
 models/
 *.mp4
-# Bỏ qua các file cache phổ biến của Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .pytest_cache/
-
-# Bỏ qua các file lưu trữ mô hình/dữ liệu dạng pickle
 *.pkl
 *.pickle
+*.taz
+**/.codex
+*.codex
+**/.agents
+*.agents
