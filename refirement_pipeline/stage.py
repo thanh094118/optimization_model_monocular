@@ -1,6 +1,7 @@
 import os
 import sys
 import pickle
+import json
 import traceback
 from pathlib import Path
 
@@ -13,6 +14,59 @@ from loguru import logger
 
 from refirement_pipeline.wham_loader import load_wham_output
 from refirement_pipeline.subject_loader import load_subject_params
+
+BODY25_JOINT_MAP = {
+    "neck": 1,
+    "right_shoulder": 2,
+    "right_elbow": 3,
+    "right_hand": 4,
+    "left_shoulder": 5,
+    "left_elbow": 6,
+    "left_hand": 7,
+    "right_hip": 9,
+    "right_knee": 10,
+    "right_ankle": 11,
+    "left_hip": 12,
+    "left_knee": 13,
+    "left_ankle": 14,
+    "right_foot": 22,
+    "left_foot": 19,
+}
+
+
+def _export_refi_jsons_from_vertices(vertices_cam_np, output_dir, frame_ids, j_regressor_path):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    j_full = np.load(j_regressor_path)
+    if j_full.shape != (25, 6890):
+        raise ValueError(
+            "J_regressor_body25 must have shape (25, 6890), got {}".format(j_full.shape)
+        )
+
+    j_regressor = torch.tensor(j_full, dtype=torch.float32)
+    verts_t = torch.tensor(vertices_cam_np, dtype=torch.float32)
+
+    if verts_t.ndim != 3 or tuple(verts_t.shape[1:]) != (6890, 3):
+        raise ValueError("vertices must have shape (T, 6890, 3), got {}".format(tuple(verts_t.shape)))
+
+    kp3d = torch.einsum("ji,tik->tjk", j_regressor, verts_t).cpu().numpy()
+
+    frame_ids_np = np.asarray(frame_ids, dtype=np.int64).ravel()
+    if frame_ids_np.shape[0] != kp3d.shape[0]:
+        frame_ids_np = np.arange(kp3d.shape[0], dtype=np.int64)
+
+    for i, frame_id in enumerate(frame_ids_np):
+        frame_joints = {}
+        for name, idx in BODY25_JOINT_MAP.items():
+            coord = kp3d[i, idx].tolist()
+            frame_joints[name] = [round(float(c), 5) for c in coord]
+
+        out_file = output_dir / "refi_data_{}.json".format(i + 1)
+        with open(out_file, "w", encoding="utf-8") as f:
+            json.dump({"camera1": frame_joints}, f, indent=2)
+
+    return str(output_dir)
 
 
 def _add_external_repo_to_path(external_repo_root):
@@ -47,6 +101,7 @@ def _load_external_modules(external_repo_root):
 
 def run_refirement_optimization(config):
     cfg = config.get("refirement", {})
+    paths_cfg = config.get("paths", {})
 
     if not cfg.get("enabled", False):
         logger.info("Running refirement because stage was explicitly requested.")
@@ -58,6 +113,7 @@ def run_refirement_optimization(config):
     return run_optimization_only(
         external=external,
         data_dir=cfg["data_dir"],
+        output_dir=paths_cfg.get("refirement_output_dir", "output/refirement_results"),
         wham_file=cfg.get("wham_file", "wham_output.pkl"),
         video_path=cfg["video"],
         intrinsics_pth=cfg["intrinsics"],
@@ -75,12 +131,14 @@ def run_refirement_optimization(config):
         print_loss_terms=cfg.get("print_loss_terms", False),
         plotting=cfg.get("plotting", False),
         save_smpl_for_viz=cfg.get("save_smpl_for_viz", True),
+        j_regressor_body25_pth=paths_cfg.get("j_regressor_body25", "models/J_regressor_body25.npy"),
     )
 
 
 def run_optimization_only(
     external,
     data_dir,
+    output_dir,
     wham_file,
     video_path,
     intrinsics_pth,
@@ -98,6 +156,7 @@ def run_optimization_only(
     print_loss_terms=False,
     plotting=False,
     save_smpl_for_viz=True,
+    j_regressor_body25_pth="models/J_regressor_body25.npy",
     weights_opt2=None,
 ):
     ut = external["ut"]
@@ -108,8 +167,9 @@ def run_optimization_only(
     getVideoRotation = external["getVideoRotation"]
     detectGait = external["detectGait"]
 
-    output_path = data_dir
-    trial_name = os.path.basename(data_dir.rstrip("/"))
+    output_path = output_dir
+    Path(output_path).mkdir(parents=True, exist_ok=True)
+    trial_name = os.path.basename(output_path.rstrip("/"))
 
     output_paths = {
         "output_dir": output_path,
@@ -117,6 +177,7 @@ def run_optimization_only(
         "optimized_pkl": None,
         "keypoints_3d_cam_pkl": None,
         "vertices_3d_cam_pkl": None,
+        "refi_jsons": None,
         "plot_objective": None,
         "plot_2d": None,
         "predicted_activity": None,
@@ -552,6 +613,15 @@ def run_optimization_only(
                     pickle.dump(vertices_cam.cpu().numpy(), f)
 
                 output_paths["vertices_3d_cam_pkl"] = verts_path
+
+                refi_jsons_dir = os.path.join(output_path, "refi_jsons")
+                j_regressor_path = j_regressor_body25_pth
+                output_paths["refi_jsons"] = _export_refi_jsons_from_vertices(
+                    vertices_cam.cpu().numpy(),
+                    refi_jsons_dir,
+                    frame_ids_arr,
+                    j_regressor_path,
+                )
 
             n_out = len(t_root_in_world)
             beta_np = beta.detach().cpu().numpy()

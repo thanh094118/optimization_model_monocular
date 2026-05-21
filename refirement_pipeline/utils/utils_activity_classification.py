@@ -1,6 +1,5 @@
 import requests
 import logging
-import os
 from loguru import logger
 from decouple import config as env_config
 
@@ -9,19 +8,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-
-def _get_video_mime_type(video_path):
-    """Get MIME type based on file extension."""
-    ext = os.path.splitext(video_path)[1].lower()
-    mime_types = {
-        ".mp4": "video/mp4",
-        ".avi": "video/x-msvideo",
-        ".mov": "video/quicktime",
-        ".mkv": "video/x-matroska",
-        ".webm": "video/webm",
-    }
-    return mime_types.get(ext, "video/mp4")  # Default to mp4 if unknown
 
 
 def predict_activity_from_video(video_path):
@@ -123,51 +109,3 @@ def predict_activity_from_video(video_path):
             logger.error(f"Could not get activity prediction: {e}")
 
     return predicted_activity, flat_floor
-
-
-import subprocess
-import json
-import requests
-import logging
-
-logger = logging.getLogger(__name__)
-
-
-def get_rotation_metadata(video_path):
-    try:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream_tags=rotate",
-            "-of",
-            "json",
-            video_path,
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        data = json.loads(result.stdout)
-        rotate_tag = data.get("streams", [{}])[0].get("tags", {}).get("rotate")
-        if rotate_tag:
-            rotation_angle = int(rotate_tag)
-            logger.info(f"Rotation metadata found: {rotation_angle} degrees")
-            return rotation_angle
-    except Exception as e:
-        logger.warning(f"No rotation metadata found or ffprobe failed: {e}")
-    return None
-
-
-if __name__ == "__main__":
-    import os
-
-    # video_path = os.path.abspath("./opencap/Data/cf9c3cfb-b532-424e-9f7e-346586d920c4/Videos/Cam0/InputMedia/walking/fa5e55eb-fd45-4541-a8e0-e0a271e49c8c.mov")
-    video_path = os.path.abspath(
-        "./opencap/Data/cf9c3cfb-b532-424e-9f7e-346586d920c4/Videos/Cam0/InputMedia/tug_sideView/d01c11f9-45cd-4159-8fcd-7c611f2f620f.mov"
-    )
-    # Test both functions
-    print("Testing predict_activity_from_video:")
-    predicted_activity, flat_floor = predict_activity_from_video(video_path)
-    print(f"Predicted activity: {predicted_activity}")
-    print(f"Flat floor assumption: {flat_floor}")

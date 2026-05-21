@@ -6,10 +6,10 @@ chmod +x setup.sh
 mô tả: cài dependent + tải file cần thiết + data để chạy demo  
 # **cách chạy**  
 B1: cấu hình path; input; parameter trong configs/pipeline.yml  
-B2: chạy flow mặc định:  
-- python main.py --config configs/pipeline.yml
-chạy từng pipeline
-- python main.py --config configs/pipeline.yml  --stage u_option   
+B2.a: chạy flow mặc định:  
+python main.py --config configs/pipeline.yml  
+B2.b: chạy từng pipeline  
+python main.py --config configs/pipeline.yml  --stage u_option   
 các option hỗ trợ:  
             "all",  
             "pose",  
