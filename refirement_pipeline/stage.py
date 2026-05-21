@@ -114,15 +114,11 @@ def run_optimization_only(
     output_paths = {
         "output_dir": output_path,
         "wham_output_pkl": None,
-        "trimmed_video": None,
         "optimized_pkl": None,
         "keypoints_3d_cam_pkl": None,
         "vertices_3d_cam_pkl": None,
         "plot_objective": None,
         "plot_2d": None,
-        "trc_file": None,
-        "scaled_model_file": None,
-        "ik_results_file": None,
         "predicted_activity": None,
         "activity_detection_method": None,
     }
@@ -265,15 +261,6 @@ def run_optimization_only(
     first_frame_id = int(frame_ids_arr[0])
     last_frame_id = int(frame_ids_arr[-1])
     opencap_mono_frame_range_video_ref = range(first_frame_id, last_frame_id + 1)
-
-    trimmed_video_path = ut.save_trimmed_video(
-        data_dir,
-        opencap_mono_frame_range_video_ref,
-        video_path,
-        ffmpeg=True,
-    )
-
-    output_paths["trimmed_video"] = trimmed_video_path
 
     beta = ut.compute_mean_beta(wham_result["betas"])
     gender = "female" if sex in ("f", "female") else "male"
@@ -452,7 +439,7 @@ def run_optimization_only(
             cutoff_frequency=filter_freq,
             smoothness_diff_n=smoothness_diff_n,
             output_dir=output_path,
-            video_path=trimmed_video_path if trimmed_video_path is not None else video_path,
+            video_path=video_path,
             frame_ids=frame_ids,
             create_contact_visualizations=False,
         )
