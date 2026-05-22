@@ -317,7 +317,7 @@ def run_phase3_pipeline(data_in, verts_by_cam=None, occlusion_tau=0.05, regulari
         cam1_corr[n] = apply_similarity(cam2[n], t21)
 
     if debug1_dir is not None:
-        write_json(debug1_dir / "fused_data_{}.json".format(frame_idx), {"M": sorted(m_set), "K1": sorted(k1_set), "K2": sorted(k2_set), "optimized": {"camera1": cam1_corr, "camera2": cam2_corr}, "step": "after_K1_K2", "joint_confidence": {"camera1": H1_all, "camera2": H2_all}, "vis1": vis1, "vis2": vis2})
+        write_json(debug1_dir / "fused_data_{}.json".format(frame_idx), {"camera1": {k: list(v) for k, v in cam1_corr.items()}, "camera2": {k: list(v) for k, v in cam2_corr.items()}})
 
     for n in m_set:
         if n not in k1_set and n not in k2_set:
@@ -327,7 +327,7 @@ def run_phase3_pipeline(data_in, verts_by_cam=None, occlusion_tau=0.05, regulari
                 cam1_corr[n] = apply_similarity(cam2[n], t21)
 
     if debug2_dir is not None:
-        write_json(debug2_dir / "fused_data_{}.json".format(frame_idx), {"M": sorted(m_set), "K1": sorted(k1_set), "K2": sorted(k2_set), "optimized": {"camera1": cam1_corr, "camera2": cam2_corr}, "step": "after_M", "joint_confidence": {"camera1": H1_all, "camera2": H2_all}, "vis1": vis1, "vis2": vis2})
+        write_json(debug2_dir / "fused_data_{}.json".format(frame_idx), {"camera1": {k: list(v) for k, v in cam1_corr.items()}, "camera2": {k: list(v) for k, v in cam2_corr.items()}})
 
     a_new = sorted(set(a_list) | k1_set | k2_set)
     f_list = [n for n in names if n not in set(a_new)]

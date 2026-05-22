@@ -31,14 +31,30 @@ def _clean_output(output_dir: Path) -> None:
     meta = output_dir / "metadata.json"
     if meta.exists():
         meta.unlink()
+    for subdir in ("keypoints3d", "metadata"):
+        target_dir = output_dir / subdir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for old_json in target_dir.glob("learnable_frame_*.json"):
+            old_json.unlink()
 
 
 def load_fused_results(input_dir: Path) -> list[dict]:
-    file_paths = sorted(input_dir.glob("fused_data_*.json"), key=_frame_index)
+    keypoints_dir = input_dir / "keypoints3d"
+    metadata_dir = input_dir / "metadata"
+    if not keypoints_dir.exists():
+        raise FileNotFoundError(f"Fused keypoints directory not found: {keypoints_dir}")
+    if not metadata_dir.exists():
+        raise FileNotFoundError(f"Fused metadata directory not found: {metadata_dir}")
+    file_paths = sorted(keypoints_dir.glob("fused_data_*.json"), key=_frame_index)
     results = []
     for path in file_paths:
         with path.open("r", encoding="utf-8") as f:
-            results.append(json.load(f))
+            frame_data = json.load(f)
+        metadata_path = metadata_dir / path.name
+        if metadata_path.exists():
+            with metadata_path.open("r", encoding="utf-8") as f:
+                frame_data.update(json.load(f))
+        results.append(frame_data)
     print(f"[Learnable] Loaded {len(results)} fused frames from {input_dir}")
     return results
 
@@ -267,7 +283,7 @@ def run_learnable_smplify(config: dict) -> None:
     judgement_results = load_fused_results(input_dir)
     frame_count = len(judgement_results)
     if frame_count == 0:
-        raise ValueError(f"No fused_data_*.json files found in {input_dir}")
+        raise ValueError(f"No fused_data_*.json files found in {input_dir / 'keypoints3d'}")
 
     wham_data = load_wham_data(cam1_pkl, cam2_pkl, frame_count)
     smpl_model = create_smpl_model(smpl_model_path, frame_count, device)
@@ -302,8 +318,14 @@ def run_learnable_smplify(config: dict) -> None:
     write_json(output_dir / "metadata.json", metadata)
 
     for i, frame_data in enumerate(output):
-        out_path = output_dir / f"learnable_frame_{i + 1}.json"
-        write_json(out_path, frame_data)
+        out_name = f"learnable_frame_{i + 1}.json"
+        keypoints_data = {
+            "camera1": frame_data.get("final", {}).get("camera1", {}),
+            "camera2": frame_data.get("final", {}).get("camera2", {}),
+        }
+        metadata_data = {k: v for k, v in frame_data.items() if k not in ("camera1", "camera2", "final", "learnable_smplify")}
+        write_json(output_dir / "keypoints3d" / out_name, keypoints_data)
+        write_json(output_dir / "metadata" / out_name, metadata_data)
         if (i + 1) % 50 == 0 or (i + 1) == frame_count:
             print(f"[Learnable] Saved {i + 1}/{frame_count} files")
 

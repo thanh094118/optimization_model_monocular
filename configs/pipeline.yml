@@ -81,7 +81,7 @@ refirement:
   parameters_yaml: "configs/parameters.yaml"
 
   activity: "sts"
-  rotation: 90
+  rotation: 0
 
   use_gpu: true
   static_cam: true

@@ -9,6 +9,11 @@ def _clean_pose_output(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     for old_json in output_dir.glob("pose_data_*.json"):
         old_json.unlink()
+    for subdir in ("keypoints3d", "metadata"):
+        target_dir = output_dir / subdir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for old_json in target_dir.glob("pose_data_*.json"):
+            old_json.unlink()
 
 
 def run_pose_export(config: dict) -> None:
@@ -58,20 +63,24 @@ def run_pose_export(config: dict) -> None:
     cam2_export_data = slice_person_frames(cam2_data, cam2_start, min_frames)
 
     for i in range(min_frames):
-        frame_data = {
+        keypoints3d_data = {
             "camera1": get_3d_joints_for_frame(model, cam1_export_data, i),
             "camera2": get_3d_joints_for_frame(model, cam2_export_data, i),
+        }
+        metadata_data = {
             "metadata": {
                 "camera_sync": sync_result,
                 "source_frame_indices": {
                     "camera1": cam1_start + i,
                     "camera2": cam2_start + i,
                 },
-            },
+            }
         }
-        output_path = output_dir / f"pose_data_{i + 1}.json"
-        write_json(output_path, frame_data)
+        keypoints_path = output_dir / "keypoints3d" / f"pose_data_{i + 1}.json"
+        metadata_path = output_dir / "metadata" / f"pose_data_{i + 1}.json"
+        write_json(keypoints_path, keypoints3d_data)
+        write_json(metadata_path, metadata_data)
         if (i + 1) % 50 == 0 or (i + 1) == min_frames:
-            print(f"[Pose] Saved {output_path.name} ({i + 1}/{min_frames})")
+            print(f"[Pose] Saved pose_data_{i + 1}.json ({i + 1}/{min_frames})")
 
     print(f"[Pose] Done. Output: {output_dir}")

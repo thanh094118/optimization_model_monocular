@@ -14,10 +14,16 @@ def _frame_index(path: Path) -> int:
     return int(match.group())
 
 
-def _clean_output(output_dir: Path, pattern: str = "*.json") -> None:
+def _clean_output(output_dir: Path, pattern: str = "*.json", create_split_dirs: bool = False) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     for old_json in output_dir.glob(pattern):
         old_json.unlink()
+    if create_split_dirs:
+        for subdir in ("keypoints3d", "metadata"):
+            target_dir = output_dir / subdir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for old_json in target_dir.glob(pattern):
+                old_json.unlink()
 
 
 def _extract_person_payload(wham_data):
@@ -60,6 +66,17 @@ def _load_verts_if_available(paths: dict, occlusion_enabled: bool):
     return True, verts_cam1, verts_cam2, verts_cam1.shape[0], verts_cam2.shape[0]
 
 
+def _load_pose_frame(path: Path, metadata_dir: Path):
+    data = read_json(path)
+    if "camera1" in data and "camera2" in data:
+        metadata_path = metadata_dir / path.name
+        if metadata_path.exists():
+            metadata_data = read_json(metadata_path)
+            data.update(metadata_data)
+        return data
+    return data
+
+
 def run_fusion(config: dict) -> None:
     paths = config["paths"]
     runtime_cfg = config.get("runtime", {})
@@ -73,14 +90,14 @@ def run_fusion(config: dict) -> None:
     output_dir = Path(paths["fused_output_dir"])
 
     debug_cfg = fusion_cfg.get("debug", {})
-    debug1_dir = Path(paths.get("debug1_dir", "output/debug1")) if debug_cfg.get("save_debug1", True) else None
-    debug2_dir = Path(paths.get("debug2_dir", "output/debug2")) if debug_cfg.get("save_debug2", False) else None
+    debug1_dir = (output_dir / "debug1") if debug_cfg.get("save_debug1", True) else None
+    debug2_dir = (output_dir / "debug2") if debug_cfg.get("save_debug2", False) else None
 
     if not input_dir.exists():
         raise FileNotFoundError(f"Pose JSON directory not found: {input_dir}")
 
     if runtime_cfg.get("clean_output", True):
-        _clean_output(output_dir, "fused_data_*.json")
+        _clean_output(output_dir, "fused_data_*.json", create_split_dirs=True)
         if debug1_dir is not None:
             _clean_output(debug1_dir, "fused_data_*.json")
         if debug2_dir is not None:
@@ -99,7 +116,13 @@ def run_fusion(config: dict) -> None:
 
     wham_loaded, verts_cam1, verts_cam2, n_frames_1, n_frames_2 = _load_verts_if_available(paths, occlusion_enabled)
 
-    file_paths = sorted(input_dir.glob("pose_data_*.json"), key=_frame_index)
+    keypoints_dir = input_dir / "keypoints3d"
+    metadata_dir = input_dir / "metadata"
+    if not keypoints_dir.exists():
+        raise FileNotFoundError(f"Pose keypoints directory not found: {keypoints_dir}")
+    if not metadata_dir.exists():
+        raise FileNotFoundError(f"Pose metadata directory not found: {metadata_dir}")
+    file_paths = sorted(keypoints_dir.glob("pose_data_*.json"), key=_frame_index)
     print(f"[Fusion] Found {len(file_paths)} pose JSON files")
 
     ransac_cfg = fusion_cfg.get("ransac", {})
@@ -108,8 +131,8 @@ def run_fusion(config: dict) -> None:
     prev_result = None
     for path in file_paths:
         frame_idx = _frame_index(path)
-        out_path = output_dir / f"fused_data_{frame_idx}.json"
-        data = read_json(path)
+        out_name = f"fused_data_{frame_idx}.json"
+        data = _load_pose_frame(path, metadata_dir=metadata_dir)
 
         if wham_loaded:
             wham_frame = frame_idx - 1
@@ -144,7 +167,13 @@ def run_fusion(config: dict) -> None:
             print(f"[Fusion] Frame {frame_idx}: FAILED ({e}) -> fallback")
             result = copy.deepcopy(prev_result) if prev_result is not None else make_raw_judgement_fallback(data, frame_idx, e)
 
-        write_json(out_path, result)
+        fused_keypoints = {
+            "camera1": result.get("optimized", {}).get("camera1", {}),
+            "camera2": result.get("optimized", {}).get("camera2", {}),
+        }
+        fused_metadata = {k: v for k, v in result.items() if k not in ("camera1", "camera2", "optimized")}
+        write_json(output_dir / "keypoints3d" / out_name, fused_keypoints)
+        write_json(output_dir / "metadata" / out_name, fused_metadata)
 
     print(f"[Fusion] Done. Output: {output_dir}")
     if debug1_dir is not None:
