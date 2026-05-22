@@ -57,11 +57,21 @@ def load_optimized_from_fused(fused_dir: Path) -> list[dict]:
     if not fused_dir.exists():
         raise FileNotFoundError(f"Fused JSON directory not found: {fused_dir}")
 
-    file_paths = sorted(fused_dir.glob("fused_data_*.json"), key=_frame_index)
+    keypoints_dir = fused_dir / "keypoints3d"
+    metadata_dir = fused_dir / "metadata"
+    if not keypoints_dir.exists():
+        raise FileNotFoundError(f"Fused keypoints directory not found: {keypoints_dir}")
+    if not metadata_dir.exists():
+        raise FileNotFoundError(f"Fused metadata directory not found: {metadata_dir}")
+    file_paths = sorted(keypoints_dir.glob("fused_data_*.json"), key=_frame_index)
     results = []
     for path in file_paths:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
+        metadata_path = metadata_dir / path.name
+        if metadata_path.exists():
+            with metadata_path.open("r", encoding="utf-8") as f:
+                data.update(json.load(f))
         if "optimized" in data:
             results.append(data["optimized"])
         else:
@@ -79,20 +89,19 @@ def load_learnable_from_dir(learnable_dir: Path) -> list[dict]:
     if not learnable_dir.exists():
         raise FileNotFoundError(f"Learnable output directory not found: {learnable_dir}")
 
-    file_paths = sorted(learnable_dir.glob("learnable_frame_*.json"), key=_frame_index)
+    keypoints_dir = learnable_dir / "keypoints3d"
+    if not keypoints_dir.exists():
+        raise FileNotFoundError(f"Learnable keypoints directory not found: {keypoints_dir}")
+
+    file_paths = sorted(keypoints_dir.glob("learnable_frame_*.json"), key=_frame_index)
     results = []
     for path in file_paths:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
-        if "final" in data:
-            results.append(data["final"])
-        elif "learnable_smplify" in data:
-            results.append(data["learnable_smplify"])
-        else:
-            results.append({
-                "camera1": data.get("camera1", {}),
-                "camera2": data.get("camera2", {}),
-            })
+        results.append({
+            "camera1": data.get("camera1", {}),
+            "camera2": data.get("camera2", {}),
+        })
 
     print(f"[Visualization] Loaded {len(results)} learnable frames from {learnable_dir}")
     return results
