@@ -18,4 +18,4 @@ các option hỗ trợ:
             "visualization",  
             "pose_fusion",  
             "postprocess",  
-            "refirement",  
+            "refinement",  

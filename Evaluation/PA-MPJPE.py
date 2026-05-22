@@ -1,9 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 Protocol 1 — Universal PA-MPJPE Evaluation (Procrustes Aligned)
-Hỗ trợ nhiều định dạng: fused_data, pose_data, openpose_25...
+Hỗ trợ nhiều định dạng, tự động map key, chạy không tương tác cho 2 camera.
+Đọc ground truth từ một thư mục chứa các file JSON tổng hợp có cấu trúc:
+{
+  "testcase_name": {
+    "camera1": { keypoint dict },
+    "camera2": { keypoint dict }
+  }
+}
+Mỗi file tương ứng một frame.
 """
 
+import csv
 import json
 import sys
 import re
@@ -16,14 +25,12 @@ from scipy.spatial import procrustes
 # CONSTANTS & MAPPING
 # ─────────────────────────────────────────────
 
-# 12 key cánh tay + cánh chân
+# 8 key cánh tay + cánh chân (shoulders, elbows, hips, knees)
 ARM_LEG_KEYS = {
     "left_shoulder", "right_shoulder",
     "left_elbow",    "right_elbow",
-    "left_hand",     "right_hand",
     "left_hip",      "right_hip",
     "left_knee",     "right_knee",
-    "left_ankle",    "right_ankle",
 }
 
 # Key uy tín (2 vai + 2 hông)
@@ -52,7 +59,7 @@ ALIASES = {
     "Neck": "neck",                "MidHip": "pelvis",
     "RBigToe": "right_toe",        "LBigToe": "left_toe",
     "RHeel": "right_foot",         "LHeel": "left_foot",
-    "Nose": "head", "REye": "head", "LEye": "head" # Approx nếu cần
+    "Nose": "head", "REye": "head", "LEye": "head"
 }
 
 # ─────────────────────────────────────────────
@@ -64,72 +71,82 @@ def _ask(prompt: str, default: str = "") -> str:
     val = input(f"{prompt}{hint}: ").strip()
     return val if val else default
 
-def _ask_int(prompt: str, default: int) -> int:
-    while True:
-        raw = _ask(prompt, str(default))
-        try:
-            return int(raw)
-        except ValueError:
-            print("  [!] Vui lòng nhập số nguyên.")
-
 def extract_frame_id(path: Path) -> int:
     """Trích xuất số từ tên file (vd: pose_data_12.json -> 12, 000000.json -> 0)"""
     nums = re.findall(r'\d+', path.stem)
     return int(nums[-1]) if nums else -1
 
-def _find_keypoint_dicts(node, path: str = "") -> list[tuple[str, dict]]:
-    results = []
-    if isinstance(node, dict):
-        vals = list(node.values())
-        # Nếu dict chứa toàn list/tuple 3 số -> đây là keypoint dict
-        if vals and all(
-            isinstance(v, (list, tuple)) and len(v) == 3
-            and all(isinstance(x, (int, float)) for x in v)
-            for v in vals
-        ):
-            results.append((path, {k: np.array(v, dtype=float) for k, v in node.items()}))
-        else:
-            for k, v in node.items():
-                child = f"{path}.{k}" if path else k
-                results.extend(_find_keypoint_dicts(v, child))
-    return results
-
-def resolve_annot_path(sample_file: Path, label: str) -> str:
-    """Tự động dò tìm cấu trúc JSON để tìm nơi chứa tọa độ 3D"""
-    with open(sample_file, encoding="utf-8") as f:
-        data = json.load(f)
-    candidates = _find_keypoint_dicts(data)
+def find_keypoints_path(data, path_so_far=""):
+    """
+    Tìm đường dẫn (dạng a.b.c) đến dict chứa keypoints 3D.
+    Ưu tiên các path chứa 'annot3' hoặc 'keypoints'.
+    """
+    candidates = []
     
-    if not candidates:
-        print(f"[ERR] Không tìm thấy tọa độ 3D hợp lệ trong {sample_file.name}")
-        sys.exit(1)
-        
-    if len(candidates) == 1:
-        print(f"  [{label}] Tự động nhận diện cấu trúc: '{candidates[0][0]}'")
-        return candidates[0][0]
+    def recurse(node, current_path):
+        if isinstance(node, dict):
+            values = list(node.values())
+            if values and all(
+                isinstance(v, (list, tuple)) and len(v) == 3 and
+                all(isinstance(x, (int, float)) for x in v)
+                for v in values
+            ):
+                candidates.append(current_path)
+            else:
+                for k, v in node.items():
+                    new_path = f"{current_path}.{k}" if current_path else k
+                    recurse(v, new_path)
+    
+    recurse(data, path_so_far)
+    
+    for cand in candidates:
+        if 'annot3' in cand or 'keypoints' in cand:
+            return cand
+    return candidates[0] if candidates else None
 
-    print(f"\n  [{label}] Tìm thấy nhiều nhóm tọa độ 3D trong file, vui lòng chọn:")
-    for i, (p, d) in enumerate(candidates):
-        preview = list(d.keys())[:3]
-        print(f"    [{i}] Path: {p if p else '<root>'}  (Ví dụ: {preview}...)")
-        
-    while True:
-        raw = _ask("  Chọn index", "0")
-        try:
-            chosen = candidates[int(raw)][0]
-            print(f"  Đã chọn: {chosen if chosen else '<root>'}")
-            return chosen
-        except (ValueError, IndexError):
-            print("  [!] Index không hợp lệ.")
-
-def load_points_by_path(path: Path, annot_path: str) -> dict:
+def load_points_auto(path: Path, default_path="annotations.annot3.keypoints") -> dict:
+    """Tải keypoints từ file JSON (dự đoán), tự động phát hiện đường dẫn."""
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    node = data
-    if annot_path:  # Nếu path rỗng thì data chính là node
-        for key in annot_path.split("."):
+    
+    try:
+        node = data
+        for key in default_path.split("."):
             node = node[key]
-    return {k: np.array(v, dtype=float) for k, v in node.items()}
+        if isinstance(node, dict):
+            sample_val = next(iter(node.values()))
+            if isinstance(sample_val, (list, tuple)) and len(sample_val) == 3:
+                return {k: np.array(v, dtype=float) for k, v in node.items()}
+    except (KeyError, TypeError, StopIteration):
+        pass
+    
+    found_path = find_keypoints_path(data)
+    if found_path:
+        node = data
+        for key in found_path.split("."):
+            node = node[key]
+        return {k: np.array(v, dtype=float) for k, v in node.items()}
+    
+    raise ValueError(f"Không tìm thấy keypoints 3D trong file {path}")
+
+def load_truth_with_cameras(file_path: Path, testcase_name: str) -> tuple[dict, dict]:
+    """
+    Đọc file ground truth tổng hợp, trả về (kp_cam1, kp_cam2)
+    Cấu trúc: { testcase_name: { "camera1": {...}, "camera2": {...} } }
+    """
+    with open(file_path, encoding="utf-8") as f:
+        data = json.load(f)
+    testcase_data = data.get(testcase_name)
+    if testcase_data is None:
+        if len(data) == 1:
+            testcase_data = next(iter(data.values()))
+        else:
+            raise KeyError(f"Không tìm thấy testcase '{testcase_name}' trong file {file_path}")
+    kp_cam1 = testcase_data.get("camera1")
+    kp_cam2 = testcase_data.get("camera2")
+    if kp_cam1 is None or kp_cam2 is None:
+        raise ValueError(f"File {file_path} thiếu key 'camera1' hoặc 'camera2'")
+    return {k: np.array(v, dtype=float) for k, v in kp_cam1.items()}, {k: np.array(v, dtype=float) for k, v in kp_cam2.items()}
 
 # ─────────────────────────────────────────────
 # AUTO MAPPING
@@ -140,8 +157,6 @@ def normalize_key(k: str) -> str:
 
 def auto_map_keys(pred_keys: list[str], truth_keys: list[str], logs: list[str]) -> list[tuple[str, str]]:
     std_index = {k: i for i, k in enumerate(STANDARD_KEYS)}
-    
-    # Tạo từ điển map từ tên chuẩn hóa sang tên gốc
     truth_norm_to_raw = {normalize_key(tk): tk for tk in truth_keys}
     
     mapping = []
@@ -151,15 +166,11 @@ def auto_map_keys(pred_keys: list[str], truth_keys: list[str], logs: list[str]) 
 
     for pk in pred_keys:
         pk_norm = normalize_key(pk)
-        
-        # 1. Khớp chính xác (sau khi chuẩn hóa tên)
         if pk_norm in truth_norm_to_raw:
             tk_raw = truth_norm_to_raw[pk_norm]
             mapping.append((pk, tk_raw))
             method = "exact/alias" if pk != tk_raw else "exact"
             lines.append(f"  {pk:18s} {tk_raw:18s} {method:15s} ✓")
-            
-        # 2. Khớp qua vị trí trong STANDARD_KEYS
         elif pk_norm in std_index:
             fi = std_index[pk_norm]
             matched_tk_raw = next(
@@ -194,20 +205,117 @@ def compute_pa_mpjpe(pred_joints: dict, truth_joints: dict, joint_pairs: list) -
     pred_matrix = np.array([pred_joints[pk] for pk, _ in valid_pairs])
     truth_matrix = np.array([truth_joints[tk] for _, tk in valid_pairs])
 
-    # Centering và tính tỉ lệ thật
     truth_mean = np.mean(truth_matrix, axis=0)
     truth_centered = truth_matrix - truth_mean
     norm_truth = np.linalg.norm(truth_centered) 
     
-    # Procrustes Alignment
     mtx1, mtx2, disparity = procrustes(truth_matrix, pred_matrix)
 
-    # Đưa về kích thước mét và tính lỗi mm
     mtx1_real = mtx1 * norm_truth
     mtx2_real = mtx2 * norm_truth
     distances = np.linalg.norm(mtx1_real - mtx2_real, axis=1) * 1000.0
 
     return {pk: float(dist) for (pk, _), dist in zip(valid_pairs, distances)}
+
+# ─────────────────────────────────────────────
+# EVALUATION CHO CẢ HAI CAMERA TỪ THƯ MỤC TRUTH TỔNG HỢP
+# ─────────────────────────────────────────────
+
+def evaluate_cameras_from_truth_folder(pred_dir: Path, truth_dir: Path, testcase_name: str, logs: list[str]) -> dict:
+    """
+    Đánh giá cho cả hai camera dựa trên thư mục truth chứa các file tổng hợp.
+    Trả về dict với keys: "CAM1", "CAM2", mỗi value là result dict.
+    """
+    pred_files = sorted(
+        [p for p in pred_dir.glob("*.json") if extract_frame_id(p) != -1],
+        key=extract_frame_id
+    )
+    if not pred_files:
+        print(f"[ERR] Không có file JSON hợp lệ trong {pred_dir}")
+        return {}
+
+    truth_files = sorted(
+        [p for p in truth_dir.glob("*.json") if extract_frame_id(p) != -1],
+        key=extract_frame_id
+    )
+    if not truth_files:
+        print(f"[ERR] Không có file JSON hợp lệ trong {truth_dir}")
+        return {}
+
+    n_frames = min(len(pred_files), len(truth_files))
+    if len(pred_files) != len(truth_files):
+        logs.append(f"[WARN] Số lượng file không khớp (pred={len(pred_files)}, truth={len(truth_files)}). Chỉ xử lý {n_frames} frame đầu.")
+        print(f"  [!] Số lượng file không khớp, chỉ xử lý {n_frames} frame.")
+
+    # Cập nhật structure để lưu thêm dữ liệu từng frame
+    results = {
+        "CAM1": {"frame_data": [], "mpjpe_all": [], "mpjpe_arm_leg": [], "mpjpe_reliable": [], "frames": 0},
+        "CAM2": {"frame_data": [], "mpjpe_all": [], "mpjpe_arm_leg": [], "mpjpe_reliable": [], "frames": 0}
+    }
+    joint_pairs_cache = {}
+
+    for i in range(n_frames):
+        pred_path = pred_files[i]
+        truth_path = truth_files[i]
+        frame_id = extract_frame_id(pred_path)
+
+        try:
+            pred_joints = load_points_auto(pred_path)
+            kp_cam1, kp_cam2 = load_truth_with_cameras(truth_path, testcase_name)
+        except Exception as e:
+            logs.append(f"[ERR] Frame {i}: {e} → bỏ qua")
+            continue
+
+        for cam, truth_joints in [("CAM1", kp_cam1), ("CAM2", kp_cam2)]:
+            cache_key = (cam, tuple(sorted(pred_joints.keys())), tuple(sorted(truth_joints.keys())))
+            if cache_key not in joint_pairs_cache:
+                pred_keys = sorted(pred_joints.keys())
+                truth_keys = sorted(truth_joints.keys())
+                joint_pairs = auto_map_keys(pred_keys, truth_keys, logs)
+                if not joint_pairs:
+                    logs.append(f"[WARN] {cam}: Không thể map keys, bỏ qua frame {i}")
+                    continue
+                joint_pairs_cache[cache_key] = joint_pairs
+            else:
+                joint_pairs = joint_pairs_cache[cache_key]
+
+            errors = compute_pa_mpjpe(pred_joints, truth_joints, joint_pairs)
+            if not errors:
+                continue
+
+            frame_all = np.mean(list(errors.values()))
+            al_vals = [v for k, v in errors.items() if normalize_key(k) in ARM_LEG_KEYS]
+            rel_vals = [v for k, v in errors.items() if normalize_key(k) in RELIABLE_KEYS]
+            
+            al_mean = np.mean(al_vals) if al_vals else np.nan
+            rel_mean = np.mean(rel_vals) if rel_vals else np.nan
+
+            results[cam]["mpjpe_all"].append(frame_all)
+            if al_vals: results[cam]["mpjpe_arm_leg"].append(al_mean)
+            if rel_vals: results[cam]["mpjpe_reliable"].append(rel_mean)
+            
+            # Lưu lại data của frame hiện tại
+            results[cam]["frame_data"].append({
+                "frame": frame_id,
+                "all": frame_all,
+                "arm_leg": al_mean,
+                "reliable": rel_mean
+            })
+            
+            results[cam]["frames"] += 1
+
+    final = {}
+    for cam in ["CAM1", "CAM2"]:
+        if results[cam]["mpjpe_all"]:
+            final[cam] = {
+                "cam": cam,
+                "mpjpe_all": np.mean(results[cam]["mpjpe_all"]),
+                "mpjpe_arm_leg": np.mean(results[cam]["mpjpe_arm_leg"]) if results[cam]["mpjpe_arm_leg"] else np.nan,
+                "mpjpe_reliable": np.mean(results[cam]["mpjpe_reliable"]) if results[cam]["mpjpe_reliable"] else np.nan,
+                "frames": results[cam]["frames"],
+                "frame_data": results[cam]["frame_data"] # Trả về list frame_data cho CSV
+            }
+    return final
 
 # ─────────────────────────────────────────────
 # MAIN
@@ -220,127 +328,76 @@ def main():
     print("  PROTOCOL 1 — UNIVERSAL PA-MPJPE EVALUATION (PROCRUSTES)")
     print("═" * 75)
 
-    # ── 1. Dữ liệu Dự đoán (Predicted) ─────────────────────────
-    pred_dir = Path(_ask("Thư mục dữ liệu Dự đoán (fused/pose/keypoints)", "pred_jsons"))
+    pred_dir = Path(_ask("Thư mục dữ liệu Dự đoán (chứa JSON mỗi frame)", "pred_jsons"))
     if not pred_dir.exists():
-        print(f"[ERR] Không tìm thấy: {pred_dir}"); sys.exit(1)
+        print(f"[ERR] Không tìm thấy: {pred_dir}")
+        sys.exit(1)
 
-    pred_files = sorted(
-        [p for p in pred_dir.glob("*.json") if extract_frame_id(p) != -1],
-        key=extract_frame_id
-    )
-    if not pred_files:
-        print(f"[ERR] Không có file JSON hợp lệ trong {pred_dir}"); sys.exit(1)
-
-    pred_annot_path = resolve_annot_path(pred_files[0], "DỮ LIỆU DỰ ĐOÁN")
-    pred_sample = load_points_by_path(pred_files[0], pred_annot_path)
-    pred_keys = sorted(pred_sample.keys())
-    print(f"  > Số lượng file: {len(pred_files)}")
-
-    # ── 2. Dữ liệu Thực tế (Ground Truth) ──────────────────────
-    print("\n" + "─" * 40)
-    truth_dir = Path(_ask("Thư mục dữ liệu Thực tế (Ground Truth)", "truth_jsons"))
+    truth_dir = Path(_ask("Thư mục Ground Truth tổng hợp (chứa file JSON mỗi frame có cấu trúc test case + 2 camera)", "truth_combined"))
     if not truth_dir.exists():
-        print(f"[ERR] Không tìm thấy: {truth_dir}"); sys.exit(1)
+        print(f"[ERR] Không tìm thấy: {truth_dir}")
+        sys.exit(1)
 
-    truth_files = sorted(
-        [p for p in truth_dir.glob("*.json") if extract_frame_id(p) != -1],
-        key=extract_frame_id
-    )
-    if not truth_files:
-        print(f"[ERR] Không có file JSON hợp lệ trong {truth_dir}"); sys.exit(1)
+    testcase_name = _ask("Tên test case (trong file ground truth)", "testcase1")
+    if not testcase_name:
+        testcase_name = "testcase1"
 
-    truth_start = _ask_int("truth_start (Index frame đầu tiên của truth)", extract_frame_id(truth_files[0]))
-    truth_annot_path = resolve_annot_path(truth_files[0], "GROUND TRUTH")
-    truth_sample = load_points_by_path(truth_files[0], truth_annot_path)
-    truth_keys = sorted(truth_sample.keys())
-    print(f"  > Số lượng file: {len(truth_files)}")
-
-    # ── Kiểm tra và Map key ────────────────────────────────────
-    joint_pairs = auto_map_keys(pred_keys, truth_keys, logs)
-    if not joint_pairs:
-        print("[ERR] Không có cặp key nào được map."); sys.exit(1)
-
-    mapped_pk = [pk for pk, _ in joint_pairs]
-    extra_raw = _ask("\n  Key tính PA-MPJPE thêm (cách bởi dấu phẩy, Enter bỏ qua)", "")
-    extra_keys = [k.strip() for k in extra_raw.split(",") if k.strip() and k.strip() in mapped_pk]
-
-    # ── Xử lý Output ───────────────────────────────────────────
-    header = f"\n{'Frame':>6}  {'Toàn thân':>12}  {'Tay+Chân(12k)':>15}  {'Uy tín(Vai+Hông)':>18}"
-    if extra_keys: header += f"  {'Extra':>12}"
-    print(header)
-    print("─" * (57 + (14 if extra_keys else 0)))
-
-    all_frame_mpjpe = []
-    all_frame_arm_leg = []
-    all_frame_reliable = []
-    all_frame_extra = []
-    missing_frames = []
-
-    for pred_path in pred_files:
-        pred_id = extract_frame_id(pred_path)
-        truth_id = truth_start + (pred_id - extract_frame_id(pred_files[0]))
-        
-        # Tìm file truth có số thứ tự tương ứng
-        truth_path_matches = [p for p in truth_files if extract_frame_id(p) == truth_id]
-        
-        if not truth_path_matches:
-            missing_frames.append(pred_id)
-            logs.append(f"[WARN] Pred {pred_id}: Không tìm thấy truth tương ứng → bỏ qua")
-            continue
-
-        try:
-            pred_joints = load_points_by_path(pred_path, pred_annot_path)
-            truth_joints = load_points_by_path(truth_path_matches[0], truth_annot_path)
-            errors = compute_pa_mpjpe(pred_joints, truth_joints, joint_pairs)
-        except Exception as e:
-            logs.append(f"[ERR] Frame {pred_id}: {e} → bỏ qua")
-            continue
-
-        if not errors: continue
-
-        # Tính toán theo nhóm (chú ý: phải kiểm tra tên gốc đã normalize)
-        frame_all = float(np.mean(list(errors.values())))
-        
-        al_vals = [v for k, v in errors.items() if normalize_key(k) in ARM_LEG_KEYS]
-        frame_arm_leg = float(np.mean(al_vals)) if al_vals else float("nan")
-        
-        rel_vals = [v for k, v in errors.items() if normalize_key(k) in RELIABLE_KEYS]
-        frame_reliable = float(np.mean(rel_vals)) if rel_vals else float("nan")
-        
-        ex_vals = [errors[k] for k in extra_keys if k in errors]
-        frame_extra = float(np.mean(ex_vals)) if ex_vals else float("nan")
-
-        all_frame_mpjpe.append(frame_all)
-        all_frame_arm_leg.append(frame_arm_leg)
-        all_frame_reliable.append(frame_reliable)
-        all_frame_extra.append(frame_extra)
-
-        al_str = f"{frame_arm_leg:.2f}" if not np.isnan(frame_arm_leg) else "N/A"
-        rel_str = f"{frame_reliable:.2f}" if not np.isnan(frame_reliable) else "N/A"
-        ex_str = f"{frame_extra:.2f}" if not np.isnan(frame_extra) else "N/A"
-        
-        line = f"{pred_id:>6}  {frame_all:>12.2f}  {al_str:>15}  {rel_str:>18}"
-        if extra_keys: line += f"  {ex_str:>12}"
-        print(line)
-
-    # ── Tổng kết ─────────────────────────────────────────────
-    if not all_frame_mpjpe:
-        print("\n[ERR] Không có frame nào được tính."); return
-
-    val_al = [x for x in all_frame_arm_leg if not np.isnan(x)]
-    val_rel = [x for x in all_frame_reliable if not np.isnan(x)]
-    val_ex = [x for x in all_frame_extra if not np.isnan(x)]
+    results = evaluate_cameras_from_truth_folder(pred_dir, truth_dir, testcase_name, logs)
 
     print("\n" + "═" * 75)
-    print(f"  Frames đã tính : {len(all_frame_mpjpe)}" + (f"  |  Bỏ qua: {missing_frames}" if missing_frames else ""))
-    print()
-    print(f"  PA-MPJPE Toàn thân        : {np.mean(all_frame_mpjpe):.2f} mm")
-    print(f"  PA-MPJPE Tay+Chân (12k)   : {np.mean(val_al):.2f} mm" if val_al else "  PA-MPJPE Tay+Chân : N/A")
-    print(f"  PA-MPJPE Uy tín (Vai+Hông): {np.mean(val_rel):.2f} mm" if val_rel else "  PA-MPJPE Uy tín   : N/A")
-    if extra_keys and val_ex:
-        print(f"  PA-MPJPE Extra [{','.join(extra_keys)}] : {np.mean(val_ex):.2f} mm")
-    print()
+    print("  KẾT QUẢ PA-MPJPE (mm)")
+    print("═" * 75)
+    print(f"{'Camera':<8} {'Toàn thân':>12} {'Tay+Chân (8 key)':>18} {'Uy tín (Vai+Hông)':>20} {'Frames':>8}")
+    print("─" * 70)
+
+    for cam in ["CAM1", "CAM2"]:
+        if cam in results:
+            r = results[cam]
+            print(f"{r['cam']:<8} {r['mpjpe_all']:>12.2f} {r['mpjpe_arm_leg']:>18.2f} {r['mpjpe_reliable']:>20.2f} {r['frames']:>8}")
+        else:
+            print(f"{cam:<8} {'N/A':>12} {'N/A':>18} {'N/A':>20} {0:>8}")
+
+    print("\n" + "═" * 75)
+    print("  XUẤT FILE CSV")
+    print("═" * 75)
+
+    # ── Ghi CSV cho từng camera ──
+    for cam in ["CAM1", "CAM2"]:
+        if cam in results:
+            r = results[cam]
+            csv_path = Path(f"pa_mpjpe_{cam.lower()}.csv")
+            
+            with open(csv_path, "w", newline="", encoding="utf-8") as cf:
+                cf.write("sep=,\n")  # Chuẩn giúp Excel tự chia cột
+                writer = csv.writer(cf)
+                
+                # Header
+                writer.writerow(["Frame", "Toan_than", "Tay_Chan_8key", "Uy_tin_Vai_Hong"])
+                
+                # Rows chi tiết từng frame
+                for fdata in r["frame_data"]:
+                    writer.writerow([
+                        fdata["frame"],
+                        f"{fdata['all']:.2f}",
+                        f"{fdata['arm_leg']:.2f}" if not np.isnan(fdata['arm_leg']) else "",
+                        f"{fdata['reliable']:.2f}" if not np.isnan(fdata['reliable']) else ""
+                    ])
+                
+                # Row tổng trung bình
+                writer.writerow([
+                    "AVERAGE",
+                    f"{r['mpjpe_all']:.2f}",
+                    f"{r['mpjpe_arm_leg']:.2f}" if not np.isnan(r['mpjpe_arm_leg']) else "",
+                    f"{r['mpjpe_reliable']:.2f}" if not np.isnan(r['mpjpe_reliable']) else ""
+                ])
+                
+            print(f"  [OK] Đã lưu kết quả chi tiết của {cam} vào {csv_path.resolve()}")
+
+    if logs:
+        log_path = Path("evaluation_log.txt")
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(logs))
+        print(f"\n[INFO] Chi tiết mapping và cảnh báo đã được lưu vào {log_path}")
 
 if __name__ == "__main__":
     main()
