@@ -1,0 +1,13 @@
+{
+    "input_dir": "output/fused_results",
+    "cam1_pkl": "input/wham_opencap_1.pkl",
+    "cam2_pkl": "input/wham_opencap_2.pkl",
+    "smpl_model": "models/SMPL_NEUTRAL.pkl",
+    "frame_count": 101,
+    "device": "cpu",
+    "camera_last_loss": {
+        "camera1": 0.007122179958969355,
+        "camera2": 0.009131217375397682
+    },
+    "timestamp": "2026-05-23T01:29:14.318171"
+}

@@ -17,9 +17,8 @@ def parse_args():
             "fusion",
             "learnable",
             "visualization",
-            "pose_fusion",
-            "Evaluation",
-            "refirement",
+            "evaluation",
+            "refinement",
         ],
         help="Override runtime.stage in YAML",
     )

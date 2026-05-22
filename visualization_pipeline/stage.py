@@ -8,6 +8,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Dict
 
 import cv2
 import matplotlib
@@ -40,7 +41,7 @@ FULL_SKELETON = [
 
 
 def _frame_index(path: Path) -> int:
-    match = re.search(r"\d+", path.name)
+    match = re.search(r"\d+", path.stem)
     if not match:
         raise ValueError(f"Cannot extract frame index from {path.name}")
     return int(match.group())
@@ -49,6 +50,8 @@ def _frame_index(path: Path) -> int:
 def _clean_output(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     for old_video in output_dir.glob("compare_*.mp4"):
+        old_video.unlink()
+    for old_video in output_dir.glob("project_*.mp4"):
         old_video.unlink()
 
 
@@ -234,6 +237,112 @@ def _read_video_frame(cap, frame_idx: int):
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
 
+def _normalize_key(k: str) -> str:
+    aliases = {
+        "RShoulder": "right_shoulder", "LShoulder": "left_shoulder",
+        "RElbow": "right_elbow", "LElbow": "left_elbow",
+        "RWrist": "right_wrist", "LWrist": "left_wrist",
+        "RHip": "right_hip", "LHip": "left_hip",
+        "RKnee": "right_knee", "LKnee": "left_knee",
+        "RAnkle": "right_ankle", "LAnkle": "left_ankle",
+        "Neck": "neck", "MidHip": "pelvis",
+        "RHeel": "right_foot", "LHeel": "left_foot",
+    }
+    return aliases.get(k, k)
+
+
+def _project_point(xyz, fx, fy, cx, cy):
+    arr = np.asarray(xyz, dtype=float).reshape(-1)
+    if arr.size < 3:
+        return None
+    x, y, z = arr[:3]
+    if not np.isfinite([x, y, z]).all() or z <= 1e-6:
+        return None
+    u = int(round(fx * x / z + cx))
+    v = int(round(fy * y / z + cy))
+    return (u, v)
+
+
+def _load_camera_keypoints_by_frame(directory: Path, pattern: str, camera_name: str) -> Dict[int, dict]:
+    files = sorted(directory.glob(pattern), key=_frame_index)
+    frame_to_kp = {}
+    for p in files:
+        with p.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        cam_data = data.get("optimized", {}).get(camera_name) if "optimized" in data else data.get(camera_name)
+        if isinstance(cam_data, dict):
+            frame_to_kp[_frame_index(p)] = {_normalize_key(k): v for k, v in cam_data.items()}
+    return frame_to_kp
+
+
+def _resolve_image_dir(paths: dict, camera_name: str) -> Path:
+    cam_idx = "1" if camera_name == "camera1" else "2"
+    candidates = [
+        Path(f"output/image_video_{cam_idx}"),
+        Path(f"output/images_video_{cam_idx}"),
+        Path(f"output/images_cam{cam_idx}"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    raise FileNotFoundError(f"Cannot find image folder for {camera_name}. Tried: {candidates}")
+
+
+def create_project2d_animation(camera_name: str, paths: dict, output_video: Path, target_fps: int, dpi: int = 100) -> None:
+    pose_map = _load_camera_keypoints_by_frame(Path(paths["pose_output_dir"]) / "keypoints3d", "pose_data_*.json", camera_name)
+    fusion_map = _load_camera_keypoints_by_frame(Path(paths["fused_output_dir"]) / "keypoints3d", "fused_data_*.json", camera_name)
+    learn_map = _load_camera_keypoints_by_frame(Path(paths["learnable_output_dir"]) / "keypoints3d", "learnable_frame_*.json", camera_name)
+    image_dir = _resolve_image_dir(paths, camera_name)
+    image_map = {_frame_index(p): p for p in sorted(image_dir.glob("images_frame_*.jpg"), key=_frame_index)}
+    if not image_map:
+        image_map = {_frame_index(p): p for p in sorted(image_dir.glob("*.jpg"), key=_frame_index)}
+
+    common_ids = sorted(set(pose_map) & set(fusion_map) & set(learn_map) & set(image_map))
+    common_ids = [i for i in common_ids if i >= 1]
+    if not common_ids:
+        raise ValueError(f"No common frame ids for {camera_name} in project2d flow.")
+
+    first_img = cv2.imread(str(image_map[common_ids[0]]))
+    h, w = first_img.shape[:2]
+    fx = fy = float((w * w + h * h) ** 0.5)
+    cx, cy = w / 2.0, h / 2.0
+
+    frame_interval = 1000 / max(target_fps, 1)
+    fig = plt.figure(figsize=(24, 8))
+    axes = [fig.add_subplot(131), fig.add_subplot(132), fig.add_subplot(133)]
+    titles = ["Pose 3D->2D", "Fusion 3D->2D", "Learnable 3D->2D"]
+    modules = [pose_map, fusion_map, learn_map]
+
+    def draw_overlay(img_bgr, joints):
+        out = img_bgr.copy()
+        proj = {}
+        for name, xyz in joints.items():
+            p = _project_point(xyz, fx, fy, cx, cy)
+            if p is not None:
+                proj[name] = p
+        for a, b in FULL_SKELETON:
+            if a in proj and b in proj:
+                cv2.line(out, proj[a], proj[b], (200, 200, 200), 2, cv2.LINE_AA)
+        for p in proj.values():
+            cv2.circle(out, p, 4, (0, 255, 255), -1, cv2.LINE_AA)
+        return cv2.cvtColor(out, cv2.COLOR_BGR2RGB)
+
+    def update(idx):
+        frame_id = common_ids[idx]
+        base = cv2.imread(str(image_map[frame_id]))
+        for ax, title, data_map in zip(axes, titles, modules):
+            ax.cla()
+            ax.imshow(draw_overlay(base, data_map[frame_id]))
+            ax.set_title(f"{title} | {camera_name} | Frame {frame_id}")
+            ax.axis("off")
+
+    animation = FuncAnimation(fig, update, frames=len(common_ids), interval=frame_interval, repeat=False)
+    output_video.parent.mkdir(parents=True, exist_ok=True)
+    animation.save(str(output_video), writer="ffmpeg", fps=target_fps, dpi=dpi)
+    plt.close(fig)
+    print(f"[Visualization] Saved project video: {output_video}")
+
+
 def create_comparison_animation(
     camera_name: str,
     optimized_poses,
@@ -358,6 +467,16 @@ def run_visualization(config: dict) -> None:
             learnable_poses=learnable_poses,
             video_map=video_map,
             frame_count=frame_count,
+            output_video=output_video,
+            target_fps=target_fps,
+            dpi=dpi,
+        )
+
+    for camera_name in cameras:
+        output_video = output_dir / f"project_{camera_name}_pose_fusion_learnable_{timestamp}.mp4"
+        create_project2d_animation(
+            camera_name=camera_name,
+            paths=paths,
             output_video=output_video,
             target_fps=target_fps,
             dpi=dpi,

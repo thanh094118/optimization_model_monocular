@@ -11,7 +11,7 @@ ALLOWED_STAGES = {
     "pose_fusion",
     "postprocess",
     "learnable_visualization",
-    "refirement",
+    "refinement",
 }
 
 
@@ -53,15 +53,15 @@ def validate_config(config):
         "fused_output_dir",
         "learnable_output_dir",
         "visualization_output_dir",
-        "refirement_output_dir",
+        "refinement_output_dir",
     ]
 
     for key in required_paths:
         if key not in paths:
             raise ValueError("Missing config path: paths.{}".format(key))
 
-    if "refirement" in config:
-        required_refirement = [
+    if "refinement" in config:
+        required_refinement = [
             "data_dir",
             "wham_file",
             "video",
@@ -70,6 +70,6 @@ def validate_config(config):
             "parameters_yaml",
         ]
 
-        for key in required_refirement:
-            if key not in config["refirement"]:
-                raise ValueError("Missing config key: refirement.{}".format(key))
+        for key in required_refinement:
+            if key not in config["refinement"]:
+                raise ValueError("Missing config key: refinement.{}".format(key))
