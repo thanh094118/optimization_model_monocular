@@ -6,6 +6,7 @@ import glob
 import json
 import os
 import re
+import csv
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
@@ -288,6 +289,44 @@ def _resolve_image_dir(paths: dict, camera_name: str) -> Path:
     raise FileNotFoundError(f"Cannot find image folder for {camera_name}. Tried: {candidates}")
 
 
+def _load_pa_mpjpe_frame_map(csv_path: Path) -> Dict[int, Dict[str, float]]:
+    frame_to_val: Dict[int, Dict[str, float]] = {}
+    if not csv_path.exists():
+        return frame_to_val
+    with csv_path.open("r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if not row:
+                continue
+            if row[0].strip().lower() in {"sep=,", "frame", "average"}:
+                continue
+            try:
+                frame_id = int(row[0].strip())
+                all_v = float(row[1].strip()) if len(row) > 1 and row[1].strip() else float("nan")
+                arm_leg_v = float(row[2].strip()) if len(row) > 2 and row[2].strip() else float("nan")
+                reliable_v = float(row[3].strip()) if len(row) > 3 and row[3].strip() else float("nan")
+                frame_to_val[frame_id] = {
+                    "all": all_v,
+                    "arm_leg": arm_leg_v,
+                    "reliable": reliable_v,
+                }
+            except ValueError:
+                continue
+    return frame_to_val
+
+
+def _build_pa_mpjpe_maps(paths: dict) -> Dict[str, Dict[str, Dict[int, Dict[str, float]]]]:
+    out: Dict[str, Dict[str, Dict[int, Dict[str, float]]]] = {}
+    eval_dir = Path(paths.get("evaluation_output_dir", "output/evaluation_results"))
+    for module_name in ("pose", "fusion", "learnable"):
+        out[module_name] = {}
+        for cam in ("camera1", "camera2"):
+            cam_tag = "cam1" if cam == "camera1" else "cam2"
+            csv_path = eval_dir / f"pa_mpjpe_{module_name}_{cam_tag}.csv"
+            out[module_name][cam] = _load_pa_mpjpe_frame_map(csv_path)
+    return out
+
+
 def create_project2d_animation(camera_name: str, paths: dict, output_video: Path, target_fps: int, dpi: int = 100) -> None:
     pose_map = _load_camera_keypoints_by_frame(Path(paths["pose_output_dir"]) / "keypoints3d", "pose_data_*.json", camera_name)
     fusion_map = _load_camera_keypoints_by_frame(Path(paths["fused_output_dir"]) / "keypoints3d", "fused_data_*.json", camera_name)
@@ -312,6 +351,8 @@ def create_project2d_animation(camera_name: str, paths: dict, output_video: Path
     axes = [fig.add_subplot(131), fig.add_subplot(132), fig.add_subplot(133)]
     titles = ["Pose 3D->2D", "Fusion 3D->2D", "Learnable 3D->2D"]
     modules = [pose_map, fusion_map, learn_map]
+    module_names = ["pose", "fusion", "learnable"]
+    pa_mpjpe_maps = _build_pa_mpjpe_maps(paths)
 
     def draw_overlay(img_bgr, joints):
         out = img_bgr.copy()
@@ -330,11 +371,34 @@ def create_project2d_animation(camera_name: str, paths: dict, output_video: Path
     def update(idx):
         frame_id = common_ids[idx]
         base = cv2.imread(str(image_map[frame_id]))
-        for ax, title, data_map in zip(axes, titles, modules):
+        for ax, title, data_map, module_name in zip(axes, titles, modules, module_names):
             ax.cla()
             ax.imshow(draw_overlay(base, data_map[frame_id]))
             ax.set_title(f"{title} | {camera_name} | Frame {frame_id}")
             ax.axis("off")
+            metrics = pa_mpjpe_maps.get(module_name, {}).get(camera_name, {}).get(frame_id, {})
+            all_v = metrics.get("all", float("nan"))
+            arm_leg_v = metrics.get("arm_leg", float("nan"))
+            reliable_v = metrics.get("reliable", float("nan"))
+            all_txt = f"{all_v:.2f}" if np.isfinite(all_v) else "N/A"
+            arm_leg_txt = f"{arm_leg_v:.2f}" if np.isfinite(arm_leg_v) else "N/A"
+            reliable_txt = f"{reliable_v:.2f}" if np.isfinite(reliable_v) else "N/A"
+            summary_lines = [
+                f"{camera_name} | PA-MPJPE(Toan_than): {all_txt} mm",
+                f"{camera_name} | Tay_Chan_8key: {arm_leg_txt} mm",
+                f"{camera_name} | Uy_tin_Vai_Hong: {reliable_txt} mm",
+            ]
+            ax.text(
+                0.01,
+                0.02,
+                "\n".join(summary_lines),
+                transform=ax.transAxes,
+                va="bottom",
+                ha="left",
+                fontsize=9,
+                color="white",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="black", alpha=0.55),
+            )
 
     animation = FuncAnimation(fig, update, frames=len(common_ids), interval=frame_interval, repeat=False)
     output_video.parent.mkdir(parents=True, exist_ok=True)
@@ -461,6 +525,9 @@ def run_visualization(config: dict) -> None:
     for camera_name in cameras:
         print(f"[Visualization] Processing {camera_name}")
         output_video = output_dir / f"compare_{camera_name}_opt_vs_video_vs_learnable_{timestamp}.mp4"
+        if output_video.exists():
+            print(f"[Visualization] Skip existing file: {output_video}")
+            continue
         create_comparison_animation(
             camera_name=camera_name,
             optimized_poses=optimized_poses,
@@ -474,6 +541,9 @@ def run_visualization(config: dict) -> None:
 
     for camera_name in cameras:
         output_video = output_dir / f"project_{camera_name}_pose_fusion_learnable_{timestamp}.mp4"
+        if output_video.exists():
+            print(f"[Visualization] Skip existing file: {output_video}")
+            continue
         create_project2d_animation(
             camera_name=camera_name,
             paths=paths,

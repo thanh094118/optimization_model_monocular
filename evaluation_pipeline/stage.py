@@ -99,6 +99,25 @@ def _load_points_auto(path: Path, default_path="annotations.annot3.keypoints") -
     raise ValueError(f"Cannot find 3D keypoints in {path}")
 
 
+def _load_pred_with_cameras(path: Path) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Standard pipeline outputs: {"camera1": {...}, "camera2": {...}}
+    if isinstance(data, dict) and "camera1" in data and "camera2" in data:
+        cam1 = data.get("camera1")
+        cam2 = data.get("camera2")
+        if isinstance(cam1, dict) and isinstance(cam2, dict):
+            return (
+                {k: np.asarray(v, dtype=float) for k, v in cam1.items()},
+                {k: np.asarray(v, dtype=float) for k, v in cam2.items()},
+            )
+
+    # Legacy or other layouts: fallback to a single set for both cameras.
+    single = _load_points_auto(path)
+    return single, single
+
+
 def _load_truth_with_cameras(file_path: Path, testcase_name: str) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     with file_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
@@ -200,13 +219,16 @@ def _evaluate_single_pred_dir(pred_dir: Path, truth_dir: Path, testcase_name: st
         truth_path = truth_by_frame[frame_id]
 
         try:
-            pred_joints = _load_points_auto(pred_path)
+            pred_cam1, pred_cam2 = _load_pred_with_cameras(pred_path)
             truth_cam1, truth_cam2 = _load_truth_with_cameras(truth_path, testcase_name)
         except Exception as exc:
             logs.append(f"[ERR] {pred_path.name}: {exc}")
             continue
 
-        for cam_name, truth_joints in (("CAM1", truth_cam1), ("CAM2", truth_cam2)):
+        for cam_name, pred_joints, truth_joints in (
+            ("CAM1", pred_cam1, truth_cam1),
+            ("CAM2", pred_cam2, truth_cam2),
+        ):
             cache_key = (cam_name, tuple(sorted(pred_joints.keys())), tuple(sorted(truth_joints.keys())))
             if cache_key not in joint_pairs_cache:
                 joint_pairs_cache[cache_key] = _auto_map_keys(sorted(pred_joints.keys()), sorted(truth_joints.keys()))
