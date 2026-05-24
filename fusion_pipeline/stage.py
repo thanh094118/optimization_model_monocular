@@ -161,7 +161,15 @@ def run_fusion(config: dict) -> None:
                 debug1_dir=debug1_dir,
                 debug2_dir=debug2_dir,
             )
-            print(f"[Fusion] Frame {frame_idx}: OK | A_new={len(result['A_new'])} F={len(result['F'])} | Mean={result['after_stats'][2]:.5f}m")
+            occluded_keys = sorted(
+                {
+                    name
+                    for name in set(result.get("vis1", {})) | set(result.get("vis2", {}))
+                    if (not result.get("vis1", {}).get(name, True)) or (not result.get("vis2", {}).get(name, True))
+                }
+            )
+            if occluded_keys:
+                print(f"[Fusion] Frame {frame_idx}: Occlusion: {', '.join(occluded_keys)}")
             prev_result = result
         except Exception as e:
             print(f"[Fusion] Frame {frame_idx}: FAILED ({e}) -> fallback")

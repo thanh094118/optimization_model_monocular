@@ -3,6 +3,11 @@ runtime:
   clean_output: true
   verbose: true
 
+preprocess:
+  offset:
+    method: "paper" # "paper" | "colab"
+    output_dir: "output/preprocess_results"
+
 paths:
   cam1_pkl: "input/wham_opencap_1.pkl"
   cam2_pkl: "input/wham_opencap_2.pkl"

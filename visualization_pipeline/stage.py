@@ -278,7 +278,11 @@ def _load_camera_keypoints_by_frame(directory: Path, pattern: str, camera_name: 
 
 def _resolve_image_dir(paths: dict, camera_name: str) -> Path:
     cam_idx = "1" if camera_name == "camera1" else "2"
+    cam_video = Path(paths.get(f"camera{cam_idx}_video", f"video_{cam_idx}.mp4"))
+    cam_video_basename = cam_video.stem
     candidates = [
+        Path(f"output/preprocess_results/images_{cam_video_basename}"),
+        Path(f"output/preprocess_results/images_video_{cam_idx}"),
         Path(f"output/image_video_{cam_idx}"),
         Path(f"output/images_video_{cam_idx}"),
         Path(f"output/images_cam{cam_idx}"),
@@ -478,9 +482,7 @@ def run_visualization(config: dict) -> None:
     else:
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("=" * 60)
     print("[Visualization] Optimized vs Video vs Learnable")
-    print("=" * 60)
 
     optimized_poses = load_optimized_from_fused(fused_dir)
     learnable_poses = load_learnable_from_dir(learnable_dir)

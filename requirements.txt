@@ -9,6 +9,7 @@ matplotlib
 opencv-python
 gdown
 loguru
+fastdtw
 trimesh
 python-decouple
 kornia==0.8.2
