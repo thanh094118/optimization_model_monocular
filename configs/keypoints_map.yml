@@ -1,0 +1,16 @@
+smpl_joint_map:
+  neck: 12
+  right_shoulder: 17
+  right_elbow: 19
+  right_hand: 21
+  left_shoulder: 16
+  left_elbow: 18
+  left_hand: 20
+  right_hip: 2
+  right_knee: 5
+  right_ankle: 8
+  left_hip: 1
+  left_knee: 4
+  left_ankle: 7
+  right_foot: 11
+  left_foot: 10

@@ -1,0 +1,17 @@
+BODY25_JOINT_MAP = {
+    "neck": 1,
+    "right_shoulder": 2,
+    "right_elbow": 3,
+    "right_hand": 4,
+    "left_shoulder": 5,
+    "left_elbow": 6,
+    "left_hand": 7,
+    "right_hip": 9,
+    "right_knee": 10,
+    "right_ankle": 11,
+    "left_hip": 12,
+    "left_knee": 13,
+    "left_ankle": 14,
+    "right_foot": 22,
+    "left_foot": 19,
+}

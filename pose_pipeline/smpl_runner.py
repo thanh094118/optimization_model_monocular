@@ -2,7 +2,9 @@ from pathlib import Path
 import numpy as np
 import torch
 import smplx
-from pose_pipeline.joint_map import SMPL_JOINT_MAP
+from keypoints_map import get_smpl_joint_map
+
+SMPL_JOINT_MAP = get_smpl_joint_map()
 
 
 def create_smpl_model(model_path):

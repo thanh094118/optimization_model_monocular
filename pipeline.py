@@ -4,32 +4,13 @@ from learnable_pipeline.stage import run_learnable_smplify
 from visualization_pipeline.stage import run_visualization
 from evaluation_pipeline.stage import run_evaluation
 from refinement_pipeline.stage import run_refinement_optimization
-from preprocess_pipeline.extract_image import extract_images, run_offset_estimation
-from preprocess_pipeline.offset_selector import resolve_selected_offset
+from preprocess_pipeline.stage import run_preprocess
 
 
 def run_pipeline(config):
     stage = config.get("runtime", {}).get("stage", "all")
 
-    # Always run preprocess first. Existing extracted folders are skipped by default.
-    extract_images(
-        input_folder="input",
-        output_folder="output/preprocess_results",
-        ffmpeg="ffmpeg",
-        ffprobe="ffprobe",
-        restart=False,
-        debug=False,
-    )
-    run_offset_estimation(
-        input_folder="input",
-        output_folder="output/preprocess_results",
-        smpl_model_path="models/SMPL_NEUTRAL.pkl",
-    )
-
-    selected_offset, selected_method, selected_path = resolve_selected_offset(config)
-    config.setdefault("runtime", {})["selected_offset"] = selected_offset
-    config["runtime"]["offset_method"] = selected_method
-    print(f"[Pipeline] Selected offset method={selected_method}, offset={selected_offset}, file={selected_path}")
+    selected_offset, _ = run_preprocess(config)
 
     if stage in ("all", "pose"):
         print(f"[Pipeline] Running pose with offset={selected_offset}")
