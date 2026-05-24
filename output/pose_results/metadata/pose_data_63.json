@@ -5,8 +5,7 @@
             "left_start": 0,
             "right_start": 0,
             "frame_count": 101,
-            "applied": false,
-            "score": 0.6099425554275513
+            "method": "paper"
         },
         "source_frame_indices": {
             "camera1": 62,

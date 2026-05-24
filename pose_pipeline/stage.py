@@ -1,6 +1,6 @@
 from pathlib import Path
 from pose_pipeline.io_utils.pkl_loader import load_pkl_data
-from pose_pipeline.sync import estimate_camera_frame_offset, slice_person_frames
+from pose_pipeline.sync import slice_person_frames
 from pose_pipeline.smpl_runner import create_smpl_model, get_3d_joints_for_frame
 from json_io import write_json
 
@@ -43,20 +43,21 @@ def run_pose_export(config: dict) -> None:
     print(f"[Pose] Loading camera 2: {cam2_file}")
     cam2_data = load_pkl_data(cam2_file)
 
-    sync_result = estimate_camera_frame_offset(
-        cam1_data,
-        cam2_data,
-        max_offset=pose_cfg.get("max_sync_offset", 40),
-        min_overlap=pose_cfg.get("min_overlap", 8),
-        min_improvement_ratio=pose_cfg.get("min_improvement_ratio", 0.05),
-    )
-    min_frames = int(sync_result["frame_count"])
-    cam1_start = int(sync_result["left_start"])
-    cam2_start = int(sync_result["right_start"])
+    offset = int(config.get("runtime", {}).get("selected_offset", 0))
+    cam1_start = max(0, -offset)
+    cam2_start = max(0, offset)
+    min_frames = max(0, min(len(cam1_data["pose"]) - cam1_start, len(cam2_data["pose"]) - cam2_start))
+    sync_result = {
+        "offset": offset,
+        "left_start": cam1_start,
+        "right_start": cam2_start,
+        "frame_count": min_frames,
+        "method": config.get("runtime", {}).get("offset_method", "unknown"),
+    }
 
     print(f"[Pose] Cam1 frames: {len(cam1_data['pose'])}")
     print(f"[Pose] Cam2 frames: {len(cam2_data['pose'])}")
-    print(f"[Pose] Sync: offset={sync_result['offset']}, cam1_start={cam1_start}, cam2_start={cam2_start}")
+    print(f"[Pose] Using offset={offset} ({sync_result['method']})")
     print(f"[Pose] Exporting {min_frames} pose JSON files...")
 
     cam1_export_data = slice_person_frames(cam1_data, cam1_start, min_frames)

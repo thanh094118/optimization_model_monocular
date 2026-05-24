@@ -11,11 +11,12 @@ python main.py --config configs/pipeline.yml
 B2.b: chạy từng pipeline  
 python main.py --config configs/pipeline.yml  --stage u_option   
 các option hỗ trợ:  
-            "all",  
-            "pose",  
-            "fusion",  
-            "learnable",  
-            "visualization",  
-            "pose_fusion",  
-            "postprocess",  
-            "refinement",  
+        choices=[
+            "all",
+            "pose",
+            "fusion",
+            "learnable",
+            "visualization",
+            "evaluation",
+            "refinement",
+        ], 
