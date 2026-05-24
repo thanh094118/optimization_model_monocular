@@ -1,21 +1,31 @@
+from __future__ import annotations
+
 import os
 import shlex
 import subprocess
 from glob import glob
+from pathlib import Path
 from os.path import join
 
+from preprocess_pipeline.config import (
+    DEFAULT_INPUT_DIR,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_SMPL_MODEL_PATH,
+    OFFSET_FILENAMES,
+    OFFSET_METHODS,
+)
+from preprocess_pipeline.logs import log_module_done, log_module_start, log_offset_selected
 from preprocess_pipeline.offset_colab import compute_offset_from_pkls as compute_colab_offset
 from preprocess_pipeline.offset_paper import compute_offset_from_pkls as compute_paper_offset
-
 
 EXTENSIONS = [".mp4", ".MP4"]
 
 
-def run(cmd):
+def _run_cmd(cmd: str) -> None:
     subprocess.run(cmd, shell=True, check=True)
 
 
-def get_video_fps(video_path, ffprobe="ffprobe"):
+def _get_video_fps(video_path: str, ffprobe: str = "ffprobe") -> float:
     cmd = (
         f'{ffprobe} -v error -select_streams v:0 -show_entries stream=r_frame_rate '
         f'-of default=noprint_wrappers=1:nokey=1 {shlex.quote(video_path)}'
@@ -31,7 +41,7 @@ def get_video_fps(video_path, ffprobe="ffprobe"):
     return fps
 
 
-def extract_images(input_folder, output_folder, ffmpeg="ffmpeg", ffprobe="ffprobe", restart=False, debug=False):
+def extract_images(input_folder: str, output_folder: str, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe", restart: bool = False, debug: bool = False) -> None:
     videos = sorted(sum([glob(join(input_folder, "*" + ext)) for ext in EXTENSIONS], []))
 
     if not videos:
@@ -43,7 +53,7 @@ def extract_images(input_folder, output_folder, ffmpeg="ffmpeg", ffprobe="ffprob
         video_basename = os.path.splitext(os.path.basename(videoname))[0]
         outpath = join(output_folder, f"images_{video_basename}")
         os.makedirs(outpath, exist_ok=True)
-        fps = get_video_fps(videoname, ffprobe=ffprobe)
+        fps = _get_video_fps(videoname, ffprobe=ffprobe)
         fps_str = f"{fps:.10f}".rstrip("0").rstrip(".")
 
         existing_frames = glob(join(outpath, "images_frame_*.jpg"))
@@ -64,7 +74,7 @@ def extract_images(input_folder, output_folder, ffmpeg="ffmpeg", ffprobe="ffprob
         print(
             f"[Preprocess] Extract start | input={videoname} | output={outpath} | fps={fps_str}"
         )
-        run(cmd)
+        _run_cmd(cmd)
         frame_count = len(glob(join(outpath, "images_frame_*.jpg")))
         print(
             f"[Preprocess] Extract done | input={videoname} | output={outpath} | "
@@ -72,7 +82,7 @@ def extract_images(input_folder, output_folder, ffmpeg="ffmpeg", ffprobe="ffprob
         )
 
 
-def run_offset_estimation(input_folder, output_folder, smpl_model_path):
+def run_offset_estimation(input_folder: str, output_folder: str, smpl_model_path: str) -> None:
     pkl_files = sorted(glob(join(input_folder, "*.pkl")))
     if len(pkl_files) < 2:
         print(f"Bỏ qua offset: cần ít nhất 2 file .pkl trong {input_folder}")
@@ -97,24 +107,55 @@ def run_offset_estimation(input_folder, output_folder, smpl_model_path):
     print(f"[Preprocess] Offset saved | colab={colab_out} | paper={paper_out}")
 
 
-if __name__ == "__main__":
-    input_folder = "input"
-    output_folder = join("output", "preprocess_results")
-    smpl_model_path = join("models", "SMPL_NEUTRAL.pkl")
-    os.makedirs(input_folder, exist_ok=True)
-    os.makedirs(output_folder, exist_ok=True)
+def _read_offset_from_txt(path: Path) -> int:
+    if not path.exists():
+        raise FileNotFoundError(f"Offset file not found: {path}")
+    raw = path.read_text(encoding="utf-8").strip()
+    if "=" in raw:
+        raw = raw.split("=", 1)[1].strip()
+    return int(raw)
 
+
+def resolve_selected_offset(config: dict) -> tuple[int, str, Path]:
+    offset_cfg = config.get("preprocess", {}).get("offset", {})
+    method = str(offset_cfg.get("method", "paper")).strip().lower()
+    if method not in OFFSET_METHODS:
+        raise ValueError(f"Invalid preprocess.offset.method={method!r}, expected 'paper' or 'colab'")
+
+    output_dir = Path(offset_cfg.get("output_dir", DEFAULT_OUTPUT_DIR))
+    filename = OFFSET_FILENAMES[method]
+    offset_path = output_dir / filename
+    offset = _read_offset_from_txt(offset_path)
+    return offset, method, offset_path
+
+
+def run_preprocess(config: dict) -> tuple[int, str]:
+    input_dir = config.get("preprocess", {}).get("input_dir", DEFAULT_INPUT_DIR)
+    output_dir = config.get("preprocess", {}).get("output_dir", DEFAULT_OUTPUT_DIR)
+    smpl_model_path = config.get("preprocess", {}).get("smpl_model_path", DEFAULT_SMPL_MODEL_PATH)
+
+    Path(input_dir).mkdir(parents=True, exist_ok=True)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    log_module_start(input_dir=input_dir, output_dir=output_dir)
     extract_images(
-        input_folder=input_folder,
-        output_folder=output_folder,
+        input_folder=input_dir,
+        output_folder=output_dir,
         ffmpeg="ffmpeg",
         ffprobe="ffprobe",
         restart=False,
         debug=False,
     )
-
     run_offset_estimation(
-        input_folder=input_folder,
-        output_folder=output_folder,
+        input_folder=input_dir,
+        output_folder=output_dir,
         smpl_model_path=smpl_model_path,
     )
+
+    selected_offset, selected_method, selected_path = resolve_selected_offset(config)
+    config.setdefault("runtime", {})["selected_offset"] = selected_offset
+    config["runtime"]["offset_method"] = selected_method
+
+    log_offset_selected(selected_method, selected_offset, str(selected_path))
+    log_module_done(output_dir=output_dir)
+    return selected_offset, selected_method

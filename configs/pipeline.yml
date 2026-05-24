@@ -4,6 +4,9 @@ runtime:
   verbose: true
 
 preprocess:
+  input_dir: "input"
+  output_dir: "output/preprocess_results"
+  smpl_model_path: "models/SMPL_NEUTRAL.pkl"
   offset:
     method: "paper" # "paper" | "colab"
     output_dir: "output/preprocess_results"
