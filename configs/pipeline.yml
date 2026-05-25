@@ -10,6 +10,13 @@ preprocess:
   offset:
     method: "paper" # "paper" | "colab"
     output_dir: "output/preprocess_results"
+  calibration:
+    file: "input/camera.calibration"
+    output_dir: "output/preprocess_results"
+    intrinsics_source: "intri_esti" # "intri_cam" | "intri_esti"
+    camera_name_map:
+      cam1: "2"
+      cam2: "8"
 
 paths:
   cam1_pkl: "input/wham_opencap_1.pkl"
@@ -25,6 +32,7 @@ paths:
   visualization_output_dir: "output/visualize_results"
   evaluation_output_dir: "output/evaluation_results"
   refinement_output_dir: "output/refinement_results"
+  hbh_output_dir: "output/hbh_results"
 
   debug1_dir: "output/debug1"
   debug2_dir: "output/debug2"
@@ -105,3 +113,11 @@ evaluation:
   enabled: true
   ground_truth_dir: "input/gtruth_results"
   testcase_name: "testcase1"
+
+hbh:
+  enabled: True
+  model: "models/yolo26x-pose.pt"
+  primary_method: "all"
+  max_frames: null
+  conf_threshold: 0.3
+  min_valid_joints: 8

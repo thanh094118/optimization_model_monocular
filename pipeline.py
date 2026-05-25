@@ -5,6 +5,7 @@ from visualization_pipeline.stage import run_visualization
 from evaluation_pipeline.stage import run_evaluation
 from refinement_pipeline.stage import run_refinement_optimization
 from preprocess_pipeline.stage import run_preprocess
+from hbh_pipeline.stage import run_hbh
 
 
 def run_pipeline(config):
@@ -35,3 +36,7 @@ def run_pipeline(config):
     if stage == "refinement":
         print(f"[Pipeline] Running refinement with offset={selected_offset}")
         run_refinement_optimization(config)
+
+    if stage in ("all", "hbh"):
+        print(f"[Pipeline] Running hbh with offset={selected_offset}")
+        run_hbh(config)

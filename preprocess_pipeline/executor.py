@@ -11,9 +11,8 @@ from preprocess_pipeline.config import (
     DEFAULT_INPUT_DIR,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_SMPL_MODEL_PATH,
-    OFFSET_FILENAMES,
-    OFFSET_METHODS,
 )
+from preprocess_pipeline.calib import export_camera_jsons, resolve_selected_offset_from_camera_profile
 from preprocess_pipeline.logs import log_module_done, log_module_start, log_offset_selected
 from preprocess_pipeline.offset_colab import compute_offset_from_pkls as compute_colab_offset
 from preprocess_pipeline.offset_paper import compute_offset_from_pkls as compute_paper_offset
@@ -82,11 +81,11 @@ def extract_images(input_folder: str, output_folder: str, ffmpeg: str = "ffmpeg"
         )
 
 
-def run_offset_estimation(input_folder: str, output_folder: str, smpl_model_path: str) -> None:
+def run_offset_estimation(input_folder: str, smpl_model_path: str) -> tuple[int, int]:
     pkl_files = sorted(glob(join(input_folder, "*.pkl")))
     if len(pkl_files) < 2:
         print(f"Bỏ qua offset: cần ít nhất 2 file .pkl trong {input_folder}")
-        return
+        return 0, 0
 
     pkl1, pkl2 = pkl_files[0], pkl_files[1]
     print(f"[Preprocess] Offset input | cam1={os.path.basename(pkl1)} | cam2={os.path.basename(pkl2)}")
@@ -94,39 +93,9 @@ def run_offset_estimation(input_folder: str, output_folder: str, smpl_model_path
     colab_offset = compute_colab_offset(pkl1, pkl2, smpl_model_path, detail_print=False)
     paper_offset = compute_paper_offset(pkl1, pkl2, smpl_model_path, verbose=False)
 
-    colab_out = join(output_folder, "offset_colab.txt")
-    paper_out = join(output_folder, "offset_paper.txt")
-
-    with open(colab_out, "w", encoding="utf-8") as f:
-        f.write(f"offset = {colab_offset}\n")
-    with open(paper_out, "w", encoding="utf-8") as f:
-        f.write(f"offset = {paper_offset}\n")
-
     print(f"[Preprocess] Offset colab={colab_offset}")
     print(f"[Preprocess] Offset paper={paper_offset}")
-    print(f"[Preprocess] Offset saved | colab={colab_out} | paper={paper_out}")
-
-
-def _read_offset_from_txt(path: Path) -> int:
-    if not path.exists():
-        raise FileNotFoundError(f"Offset file not found: {path}")
-    raw = path.read_text(encoding="utf-8").strip()
-    if "=" in raw:
-        raw = raw.split("=", 1)[1].strip()
-    return int(raw)
-
-
-def resolve_selected_offset(config: dict) -> tuple[int, str, Path]:
-    offset_cfg = config.get("preprocess", {}).get("offset", {})
-    method = str(offset_cfg.get("method", "paper")).strip().lower()
-    if method not in OFFSET_METHODS:
-        raise ValueError(f"Invalid preprocess.offset.method={method!r}, expected 'paper' or 'colab'")
-
-    output_dir = Path(offset_cfg.get("output_dir", DEFAULT_OUTPUT_DIR))
-    filename = OFFSET_FILENAMES[method]
-    offset_path = output_dir / filename
-    offset = _read_offset_from_txt(offset_path)
-    return offset, method, offset_path
+    return int(paper_offset), int(colab_offset)
 
 
 def run_preprocess(config: dict) -> tuple[int, str]:
@@ -146,13 +115,13 @@ def run_preprocess(config: dict) -> tuple[int, str]:
         restart=False,
         debug=False,
     )
-    run_offset_estimation(
+    offset_paper, offset_colab = run_offset_estimation(
         input_folder=input_dir,
-        output_folder=output_dir,
         smpl_model_path=smpl_model_path,
     )
+    export_camera_jsons(config, offset_paper=offset_paper, offset_colab=offset_colab)
 
-    selected_offset, selected_method, selected_path = resolve_selected_offset(config)
+    selected_offset, selected_method, selected_path = resolve_selected_offset_from_camera_profile(config)
     config.setdefault("runtime", {})["selected_offset"] = selected_offset
     config["runtime"]["offset_method"] = selected_method
 

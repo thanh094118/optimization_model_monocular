@@ -19,6 +19,7 @@ def parse_args():
             "visualization",
             "evaluation",
             "refinement",
+            "hbh",
         ],
         help="Override runtime.stage in YAML",
     )
