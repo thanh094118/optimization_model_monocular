@@ -35,21 +35,28 @@ def _frame_index(path: Path) -> int:
     return int(m[-1]) if m else -1
 
 
-def _build_projection_matrix(cam_profile: dict) -> np.ndarray:
+def _build_projection_matrix(cam_profile: dict, rotation_mode: str = "raw") -> np.ndarray:
     intr = np.asarray(cam_profile.get("intrinsics_cam", []), dtype=float)
     if intr.shape != (3, 3):
         raise ValueError("Invalid intrinsics_cam in data_cam1.json")
     R = np.asarray(cam_profile.get("extrinsic_cam", []), dtype=float)
     if R.shape != (3, 3):
         raise ValueError("Invalid extrinsic_cam in data_cam1.json")
-    t = np.asarray(cam_profile.get("xyz", []), dtype=float).reshape(-1)
+    t = np.asarray(cam_profile.get("tvec", cam_profile.get("xyz", [])), dtype=float).reshape(-1)
     if t.size != 3:
-        raise ValueError("Invalid xyz in data_cam1.json")
+        raise ValueError("Invalid tvec in data_cam1.json")
 
-    # Keep parity with HBH triangulation camera model in hbh_pipeline.execute.build_projection_matrix.
+    mode = str(rotation_mode).strip().lower()
     R_use = R.copy()
-    R_use[1:, :] *= -1.0
-    Rt = np.hstack([R_use, (-R_use @ t.reshape(3, 1))])
+    if mode == "raw":
+        pass
+    elif mode == "flip_rows_yz":
+        R_use[1:, :] *= -1.0
+    elif mode == "flip_cols_yz":
+        R_use[:, 1:] *= -1.0
+    else:
+        raise ValueError("hbh.rotation_mode must be one of: raw, flip_rows_yz, flip_cols_yz")
+    Rt = np.hstack([R_use, t.reshape(3, 1)])
     return intr @ Rt
 
 
@@ -133,7 +140,8 @@ def run_hbh_visualization(config: dict) -> None:
     fps = cap.get(cv2.CAP_PROP_FPS) or 10.0
 
     cam_profile = load_camera_profile(config, "cam1")
-    P = _build_projection_matrix(cam_profile)
+    rotation_mode = str(hbh_cfg.get("rotation_mode", "raw"))
+    P = _build_projection_matrix(cam_profile, rotation_mode=rotation_mode)
 
     method_names = [d.name.replace("method_", "") for d in method_dirs]
     method_kp_maps = {m: _load_method_frame_map(d) for m, d in zip(method_names, method_dirs)}
@@ -158,8 +166,9 @@ def run_hbh_visualization(config: dict) -> None:
     # Avoid codec limits for very large frame sizes (5-column layout can exceed MPEG-4 constraints).
     max_canvas_w = int(hbh_cfg.get("vis_max_width", 3840))
     max_canvas_h = int(hbh_cfg.get("vis_max_height", 2160))
+    header_h = int(hbh_cfg.get("vis_header_height", 140))
     cols = len(method_names)
-    canvas_w, canvas_h = w * cols, h
+    canvas_w, canvas_h = w * cols, h + header_h
     scale = min(max_canvas_w / float(canvas_w), max_canvas_h / float(canvas_h), 1.0)
     out_w = max(2, int(round(canvas_w * scale)))
     out_h = max(2, int(round(canvas_h * scale)))
@@ -186,11 +195,19 @@ def run_hbh_visualization(config: dict) -> None:
         for method in method_names:
             overlay = _draw_overlay(frame, method_kp_maps[method][frame_id], P)
             metrics = method_pa_maps.get(method, {}).get(frame_id, {})
-            t1 = f"{method} | Frame {frame_id}"
-            t2 = f"PA: {metrics.get('all', float('nan')):.2f} | AL: {metrics.get('arm_leg', float('nan')):.2f} | RH: {metrics.get('reliable', float('nan')):.2f}"
-            cv2.putText(overlay, t1, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
-            cv2.putText(overlay, t2, (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
-            cols.append(overlay)
+            all_v = metrics.get("all", float("nan"))
+            arm_leg_v = metrics.get("arm_leg", float("nan"))
+            all_txt = f"{all_v:.2f}" if np.isfinite(all_v) else "N/A"
+            arm_leg_txt = f"{arm_leg_v:.2f}" if np.isfinite(arm_leg_v) else "N/A"
+
+            t1 = f"{method} | 3D -> 2D | PA-MPJPE"
+            t2 = f"toan_than: {all_txt} mm | tay_chan: {arm_leg_txt} mm"
+            header = np.full((header_h, w, 3), 24, dtype=np.uint8)
+            cv2.putText(header, t1, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 2.93, (0, 0, 0), 14, cv2.LINE_AA)
+            cv2.putText(header, t1, (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 2.93, (255, 255, 255), 6, cv2.LINE_AA)
+            cv2.putText(header, t2, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 2.48, (0, 0, 0), 14, cv2.LINE_AA)
+            cv2.putText(header, t2, (20, 135), cv2.FONT_HERSHEY_SIMPLEX, 2.48, (255, 255, 255), 6, cv2.LINE_AA)
+            cols.append(np.vstack([header, overlay]))
         canvas = np.hstack(cols)
         if (out_w, out_h) != (canvas.shape[1], canvas.shape[0]):
             canvas = cv2.resize(canvas, (out_w, out_h), interpolation=cv2.INTER_AREA)

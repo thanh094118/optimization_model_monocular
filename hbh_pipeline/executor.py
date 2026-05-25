@@ -5,21 +5,39 @@ from pathlib import Path
 
 import cv2
 import pickle
+import numpy as np
+from scipy.linalg import svd
+from scipy.optimize import least_squares
+from ultralytics import YOLO
 
 from json_io import read_json, write_json
 from hbh_pipeline.config import DEFAULT_OUTPUT_DIR
-from hbh_pipeline.execute import (
-    YOLO,
-    TRIANGULATION_METHODS,
-    build_projection_matrix,
-    coco_conf_to_h36m,
-    coco_to_h36m,
-    detect_2d_pose,
-)
 from hbh_pipeline.logs import log_disabled, log_done, log_start, log_summary
 from hbh_pipeline.evaluation import run_hbh_evaluation
 from hbh_pipeline.visualization import run_hbh_visualization
 from keypoints_map import get_smpl_joint_map
+
+COCO_TO_H36M = {
+    0: [11, 12], 1: [12], 2: [14], 3: [16],
+    4: [11], 5: [13], 6: [15],
+    7: [5, 6, 11, 12], 8: [5, 6], 9: [0], 10: [0],
+    11: [5], 12: [7], 13: [9], 14: [6], 15: [8], 16: [10],
+}
+
+H36M_BONES = [
+    (0, 1), (1, 2), (2, 3), (0, 4), (4, 5), (5, 6),
+    (0, 7), (7, 8), (8, 9), (9, 10),
+    (8, 11), (11, 12), (12, 13),
+    (8, 14), (14, 15), (15, 16),
+]
+
+H36M_BONE_LENGTHS = {
+    (0, 1): 132, (1, 2): 442, (2, 3): 430,
+    (0, 4): 132, (4, 5): 442, (5, 6): 430,
+    (0, 7): 233, (7, 8): 257, (8, 9): 121, (9, 10): 115,
+    (8, 11): 151, (11, 12): 278, (12, 13): 251,
+    (8, 14): 151, (14, 15): 278, (15, 16): 251,
+}
 
 
 def _clean_output(output_dir: Path) -> None:
@@ -35,11 +53,172 @@ def _clean_output(output_dir: Path) -> None:
 
 def _load_camera_params(profile_path: Path) -> dict:
     data = read_json(profile_path)
+    tvec = data.get("tvec", data.get("xyz"))
+    if tvec is None:
+        raise KeyError(f"Missing 'tvec' in {profile_path} (legacy fallback 'xyz' also missing)")
     return {
         "affine_intrinsics_matrix": data["intrinsics_cam"],
         "extrinsic_matrix": data["extrinsic_cam"],
-        "xyz": data["xyz"],
+        "tvec": tvec,
     }
+
+
+def _build_projection_matrix(cam: dict, rotation_mode: str = "raw") -> np.ndarray:
+    fx = cam["affine_intrinsics_matrix"][0][0]
+    fy = cam["affine_intrinsics_matrix"][1][1]
+    cx = cam["affine_intrinsics_matrix"][0][2]
+    cy = cam["affine_intrinsics_matrix"][1][2]
+    K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=float)
+    R = np.array(cam["extrinsic_matrix"], dtype=float)
+    t = np.array(cam["tvec"], dtype=float)
+
+    mode = str(rotation_mode).strip().lower()
+    if mode == "raw":
+        pass
+    elif mode == "flip_rows_yz":
+        R[1:, :] *= -1.0
+    elif mode == "flip_cols_yz":
+        R[:, 1:] *= -1.0
+    else:
+        raise ValueError("hbh.rotation_mode must be one of: raw, flip_rows_yz, flip_cols_yz")
+
+    Rt = np.hstack([R, t.reshape(3, 1)])
+    return K @ Rt
+
+
+def detect_2d_pose(model, frame):
+    results = model(frame, verbose=False)
+    if len(results) == 0 or results[0].keypoints is None:
+        return None, None
+    keypoints = results[0].keypoints
+    if keypoints.xy is None or len(keypoints.xy) == 0:
+        return None, None
+    if keypoints.conf is not None and len(keypoints.conf) > 0:
+        best_idx = keypoints.conf.mean(dim=1).argmax().item()
+    else:
+        best_idx = 0
+    xy = keypoints.xy[best_idx].cpu().numpy()
+    conf = keypoints.conf[best_idx].cpu().numpy() if keypoints.conf is not None else np.ones(17)
+    return xy, conf
+
+
+def coco_to_h36m(coco_kps):
+    h36m = np.zeros((17, coco_kps.shape[1]), dtype=float)
+    for h_idx, c_idxs in COCO_TO_H36M.items():
+        h36m[h_idx] = np.mean(coco_kps[c_idxs], axis=0)
+    return h36m
+
+
+def coco_conf_to_h36m(conf):
+    h36m_conf = np.zeros(17, dtype=float)
+    for h_idx, c_idxs in COCO_TO_H36M.items():
+        h36m_conf[h_idx] = np.mean(conf[c_idxs])
+    return h36m_conf
+
+
+def _dlt_single(P1, P2, pt1, pt2):
+    x1, y1 = pt1
+    x2, y2 = pt2
+    A = np.array([x1 * P1[2] - P1[0], y1 * P1[2] - P1[1], x2 * P2[2] - P2[0], y2 * P2[2] - P2[1]])
+    _, _, vt = svd(A)
+    X = vt[-1]
+    return X[:3] / X[3]
+
+
+def _reproject(P, pt3d):
+    h = P @ np.append(pt3d, 1.0)
+    return h[:2] / h[2]
+
+
+def triangulate_dlt(P1, P2, pts1, pts2, *_):
+    return np.array([_dlt_single(P1, P2, pts1[i], pts2[i]) for i in range(len(pts1))])
+
+
+def triangulate_conf_algebraic(P1, P2, pts1, pts2, conf1, conf2):
+    n = len(pts1)
+    pts_3d = np.zeros((n, 3), dtype=float)
+    for i in range(n):
+        x1, y1 = pts1[i]
+        x2, y2 = pts2[i]
+        w1 = np.clip(conf1[i], 0.01, 1.0) ** 2
+        w2 = np.clip(conf2[i], 0.01, 1.0) ** 2
+        A = np.array([w1 * (x1 * P1[2] - P1[0]), w1 * (y1 * P1[2] - P1[1]), w2 * (x2 * P2[2] - P2[0]), w2 * (y2 * P2[2] - P2[1])])
+        _, _, vt = svd(A)
+        X = vt[-1]
+        pts_3d[i] = X[:3] / X[3]
+    return pts_3d
+
+
+def triangulate_ransac(P1, P2, pts1, pts2, conf1, conf2, reproj_thresh=15.0):
+    n = len(pts1)
+    pts_3d = np.zeros((n, 3), dtype=float)
+    for i in range(n):
+        pt3d = _dlt_single(P1, P2, pts1[i], pts2[i])
+        err1 = np.linalg.norm(_reproject(P1, pt3d) - pts1[i])
+        err2 = np.linalg.norm(_reproject(P2, pt3d) - pts2[i])
+        if err1 > reproj_thresh and err2 < reproj_thresh:
+            w1, w2 = 0.1, 1.0
+        elif err2 > reproj_thresh and err1 < reproj_thresh:
+            w1, w2 = 1.0, 0.1
+        elif err1 > reproj_thresh and err2 > reproj_thresh:
+            w1, w2 = conf1[i] ** 2, conf2[i] ** 2
+        else:
+            w1, w2 = conf1[i], conf2[i]
+        A = np.array([w1 * (pts1[i, 0] * P1[2] - P1[0]), w1 * (pts1[i, 1] * P1[2] - P1[1]), w2 * (pts2[i, 0] * P2[2] - P2[0]), w2 * (pts2[i, 1] * P2[2] - P2[1])])
+        _, _, vt = svd(A)
+        X = vt[-1]
+        pts_3d[i] = X[:3] / X[3]
+    return pts_3d
+
+
+def triangulate_iterative(P1, P2, pts1, pts2, conf1, conf2, n_iter=50):
+    n = len(pts1)
+    pts_3d = np.zeros((n, 3), dtype=float)
+    for i in range(n):
+        x0 = _dlt_single(P1, P2, pts1[i], pts2[i])
+        w1 = np.clip(conf1[i], 0.1, 1.0)
+        w2 = np.clip(conf2[i], 0.1, 1.0)
+        def residuals(X):
+            r1 = _reproject(P1, X) - pts1[i]
+            r2 = _reproject(P2, X) - pts2[i]
+            return np.concatenate([w1 * r1, w2 * r2])
+        result = least_squares(residuals, x0, method="lm", max_nfev=n_iter)
+        pts_3d[i] = result.x
+    return pts_3d
+
+
+def triangulate_anatomical(P1, P2, pts1, pts2, conf1, conf2, bone_weight=0.01, n_iter=80):
+    init_3d = triangulate_iterative(P1, P2, pts1, pts2, conf1, conf2, n_iter=30)
+    ref_bones = {}
+    for j1, j2 in H36M_BONES:
+        ref_bones[(j1, j2)] = H36M_BONE_LENGTHS.get((j1, j2), np.linalg.norm(init_3d[j1] - init_3d[j2]))
+    x0 = init_3d.flatten()
+    def full_residuals(X):
+        pts = X.reshape(17, 3)
+        res = []
+        for i in range(17):
+            w1 = np.clip(conf1[i], 0.1, 1.0)
+            w2 = np.clip(conf2[i], 0.1, 1.0)
+            r1 = _reproject(P1, pts[i]) - pts1[i]
+            r2 = _reproject(P2, pts[i]) - pts2[i]
+            res.extend([w1 * r1[0], w1 * r1[1], w2 * r2[0], w2 * r2[1]])
+        for j1, j2 in H36M_BONES:
+            bone_len = np.linalg.norm(pts[j1] - pts[j2])
+            target_len = ref_bones[(j1, j2)]
+            if target_len > 0:
+                res.append(bone_weight * (bone_len - target_len))
+        return np.array(res)
+    result = least_squares(full_residuals, x0, method="trf", max_nfev=n_iter)
+    return result.x.reshape(17, 3)
+
+
+TRIANGULATION_METHODS = {
+    "DLT (baseline)": triangulate_dlt,
+    "Conf-Algebraic": triangulate_conf_algebraic,
+    "RANSAC-DLT": triangulate_ransac,
+    "Iterative Refine": triangulate_iterative,
+    "Anatomical (SOTA)": triangulate_anatomical,
+}
 
 
 H36M_TO_SYSTEM = {
@@ -98,9 +277,10 @@ def run_hbh(config: dict) -> None:
 
     model_name = hbh_cfg.get("model", "yolo26x-pose.pt")
     pose_model = YOLO(model_name)
+    rotation_mode = str(hbh_cfg.get("rotation_mode", "raw"))
 
-    P1 = build_projection_matrix(_load_camera_params(cam1_profile))
-    P2 = build_projection_matrix(_load_camera_params(cam2_profile))
+    P1 = _build_projection_matrix(_load_camera_params(cam1_profile), rotation_mode=rotation_mode)
+    P2 = _build_projection_matrix(_load_camera_params(cam2_profile), rotation_mode=rotation_mode)
 
     cap1 = cv2.VideoCapture(str(video1))
     cap2 = cv2.VideoCapture(str(video2))
