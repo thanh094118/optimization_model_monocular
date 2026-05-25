@@ -13,6 +13,7 @@ def parse_args():
         default=None,
         choices=[
             "all",
+            "preprocess",
             "pose",
             "fusion",
             "learnable",

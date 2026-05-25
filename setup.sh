@@ -52,8 +52,8 @@ declare -A FILE_IDS=(
     ["input/cameraIntrinsics.pickle"]="1Lhg4qY8GEg4V6ZE8nK4rD7mP4PAbE9DS"
     ["input/wham_opencap_1.pkl"]="12xU0FGZpFaWOcQ6JKHUqyJdQClL4I1of"
     ["input/wham_opencap_2.pkl"]="1xfVxIVfp6A1D8q3YXca8_CAFzgxtBgyY"
-    ["input/video_2.mp4"]="1a02Vv976w-7bLpZAj__NdTOGwtmDL_NL"
-    ["input/video_8.mp4"]="1quUAbCczwASRbnx2HqNIDFusosfu4wA1"
+    ["input/video_1.mp4"]="1a02Vv976w-7bLpZAj__NdTOGwtmDL_NL"
+    ["input/video_2.mp4"]="1quUAbCczwASRbnx2HqNIDFusosfu4wA1"
 )
 
 download_file() {

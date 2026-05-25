@@ -89,7 +89,7 @@ def export_camera_jsons(config: dict, offset_paper: int, offset_colab: int) -> N
                 [0.0, 0.0, 1.0],
             ],
             "extrinsic_cam": [row[:3] for row in extr[:3]],
-            "xyz": [extr[0][3], extr[1][3], extr[2][3]],
+            "tvec": [extr[0][3], extr[1][3], extr[2][3]],
         }
         write_json(output_dir / f"data_{cam_id}.json", payload)
 

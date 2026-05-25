@@ -4,6 +4,7 @@ import yaml
 
 ALLOWED_STAGES = {
     "all",
+    "preprocess",
     "pose",
     "fusion",
     "learnable",
