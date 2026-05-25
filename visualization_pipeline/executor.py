@@ -15,6 +15,7 @@ import cv2
 import matplotlib
 import numpy as np
 from visualization_pipeline.logs import log_disabled, log_done, log_header
+from preprocess_pipeline.calib import resolve_selected_intrinsics
 
 # Use non-interactive backend so the phase works from normal Python CLI.
 matplotlib.use("Agg")
@@ -329,7 +330,7 @@ def _build_pa_mpjpe_maps(paths: dict) -> Dict[str, Dict[str, Dict[int, Dict[str,
     return out
 
 
-def create_project2d_animation(camera_name: str, paths: dict, output_video: Path, target_fps: int, dpi: int = 100) -> None:
+def create_project2d_animation(camera_name: str, config: dict, paths: dict, output_video: Path, target_fps: int, dpi: int = 100) -> None:
     pose_map = _load_camera_keypoints_by_frame(Path(paths["pose_output_dir"]) / "keypoints3d", "pose_data_*.json", camera_name)
     fusion_map = _load_camera_keypoints_by_frame(Path(paths["fused_output_dir"]) / "keypoints3d", "fused_data_*.json", camera_name)
     learn_map = _load_camera_keypoints_by_frame(Path(paths["learnable_output_dir"]) / "keypoints3d", "learnable_frame_*.json", camera_name)
@@ -343,10 +344,12 @@ def create_project2d_animation(camera_name: str, paths: dict, output_video: Path
     if not common_ids:
         raise ValueError(f"No common frame ids for {camera_name} in project2d flow.")
 
-    first_img = cv2.imread(str(image_map[common_ids[0]]))
-    h, w = first_img.shape[:2]
-    fx = fy = float((w * w + h * h) ** 0.5)
-    cx, cy = w / 2.0, h / 2.0
+    cam_id = "cam1" if camera_name == "camera1" else "cam2"
+    intr = np.asarray(resolve_selected_intrinsics(config, cam_id), dtype=float)
+    if intr.shape != (3, 3):
+        raise ValueError(f"Invalid selected intrinsics in data_{cam_id}.json")
+    fx, fy = float(intr[0, 0]), float(intr[1, 1])
+    cx, cy = float(intr[0, 2]), float(intr[1, 2])
 
     frame_interval = 1000 / max(target_fps, 1)
     fig = plt.figure(figsize=(24, 8))
@@ -528,6 +531,7 @@ def run_visualization(config: dict) -> None:
         output_video = output_dir / f"project_{camera_name}_pose_fusion_learnable_{timestamp}.mp4"
         create_project2d_animation(
             camera_name=camera_name,
+            config=config,
             paths=paths,
             output_video=output_video,
             target_fps=target_fps,

@@ -1,22 +1,5 @@
-# **ver demo test - chỉ hỗ trợ chạy thủ công từng testcase**  
-Input là 2 file .pkl từ wham/wham_opencap  
-# **cách setup  - cài sẵn py3.9 + pip ...**  
-chmod +x setup.sh  
-./setup.sh  
-mô tả: cài dependent + tải file cần thiết + data để chạy demo  
-# **cách chạy**  
-B1: cấu hình path; input; parameter trong configs/pipeline.yml  
-B2.a: chạy flow mặc định:  
-python main.py --config configs/pipeline.yml  
-B2.b: chạy từng pipeline  
-python main.py --config configs/pipeline.yml  --stage u_option   
-các option hỗ trợ:  
-        choices=[
-            "all",
-            "pose",
-            "fusion",
-            "learnable",
-            "visualization",
-            "evaluation",
-            "refinement",
-        ], 
+Reread AGENTS.md and conversation_cache before continuing. Continue from current project state.
+
+Persist project state before ending: update current_status.md, decisions.md if needed, todo.md, known_issues.md, edge_cases.md, and datasets.md if relevant.
+
+python main.py --config configs/pipeline.yml --stage 
