@@ -35,22 +35,41 @@ def _frame_index(path: Path) -> int:
     return int(m[-1]) if m else -1
 
 
-def _project_point(xyz, fx, fy, cx, cy):
+def _build_projection_matrix(cam_profile: dict) -> np.ndarray:
+    intr = np.asarray(cam_profile.get("intrinsics_cam", []), dtype=float)
+    if intr.shape != (3, 3):
+        raise ValueError("Invalid intrinsics_cam in data_cam1.json")
+    R = np.asarray(cam_profile.get("extrinsic_cam", []), dtype=float)
+    if R.shape != (3, 3):
+        raise ValueError("Invalid extrinsic_cam in data_cam1.json")
+    t = np.asarray(cam_profile.get("xyz", []), dtype=float).reshape(-1)
+    if t.size != 3:
+        raise ValueError("Invalid xyz in data_cam1.json")
+
+    # Keep parity with HBH triangulation camera model in hbh_pipeline.execute.build_projection_matrix.
+    R_use = R.copy()
+    R_use[1:, :] *= -1.0
+    Rt = np.hstack([R_use, (-R_use @ t.reshape(3, 1))])
+    return intr @ Rt
+
+
+def _project_point(xyz, P: np.ndarray):
     arr = np.asarray(xyz, dtype=float).reshape(-1)
     if arr.size < 3:
         return None
-    x, y, z = arr[:3]
-    if not np.isfinite([x, y, z]).all() or z <= 1e-6:
+    if not np.isfinite(arr[:3]).all():
         return None
-    return int(round(fx * x / z + cx)), int(round(fy * y / z + cy))
+    h = P @ np.array([arr[0], arr[1], arr[2], 1.0], dtype=float)
+    if not np.isfinite(h).all() or abs(h[2]) <= 1e-9:
+        return None
+    return int(round(h[0] / h[2])), int(round(h[1] / h[2]))
 
 
-def _draw_overlay(img_bgr: np.ndarray, joints: dict, intr: np.ndarray) -> np.ndarray:
+def _draw_overlay(img_bgr: np.ndarray, joints: dict, P: np.ndarray) -> np.ndarray:
     out = img_bgr.copy()
-    fx, fy, cx, cy = float(intr[0, 0]), float(intr[1, 1]), float(intr[0, 2]), float(intr[1, 2])
     proj = {}
     for name, xyz in joints.items():
-        p = _project_point(xyz, fx, fy, cx, cy)
+        p = _project_point(xyz, P)
         if p is not None:
             proj[name] = p
     for a, b in SKELETON:
@@ -114,9 +133,7 @@ def run_hbh_visualization(config: dict) -> None:
     fps = cap.get(cv2.CAP_PROP_FPS) or 10.0
 
     cam_profile = load_camera_profile(config, "cam1")
-    intr = np.asarray(cam_profile.get("intrinsics_cam", []), dtype=float)
-    if intr.shape != (3, 3):
-        raise ValueError("Invalid intrinsics_cam in data_cam1.json")
+    P = _build_projection_matrix(cam_profile)
 
     method_names = [d.name.replace("method_", "") for d in method_dirs]
     method_kp_maps = {m: _load_method_frame_map(d) for m, d in zip(method_names, method_dirs)}
@@ -167,7 +184,7 @@ def run_hbh_visualization(config: dict) -> None:
             continue
         cols = []
         for method in method_names:
-            overlay = _draw_overlay(frame, method_kp_maps[method][frame_id], intr)
+            overlay = _draw_overlay(frame, method_kp_maps[method][frame_id], P)
             metrics = method_pa_maps.get(method, {}).get(frame_id, {})
             t1 = f"{method} | Frame {frame_id}"
             t2 = f"PA: {metrics.get('all', float('nan')):.2f} | AL: {metrics.get('arm_leg', float('nan')):.2f} | RH: {metrics.get('reliable', float('nan')):.2f}"
