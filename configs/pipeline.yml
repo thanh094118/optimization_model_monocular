@@ -121,4 +121,4 @@ hbh:
   max_frames: null
   conf_threshold: 0.3
   min_valid_joints: 8
-  rotation_mode: "flip_cols_yz" # "raw" | "flip_rows_yz" | "flip_cols_yz"
+  rotation_mode: "raw" # "raw" | "flip_rows_yz" | "flip_cols_yz"
