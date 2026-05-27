@@ -313,7 +313,7 @@ def run_hbh(config: dict) -> None:
 
         kps1_coco, conf1 = detect_2d_pose(pose_model, frame1)
         kps2_coco, conf2 = detect_2d_pose(pose_model, frame2)
-        if kps1_coco is None or kps2_coco is None:
+        if kps1_coco is None or kps2_coco is None or conf1 is None or conf2 is None:
             continue
         if len(kps1_coco) != 17 or len(kps2_coco) != 17:
             continue
