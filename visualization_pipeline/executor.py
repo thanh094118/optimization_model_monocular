@@ -528,7 +528,7 @@ def run_visualization(config: dict) -> None:
         )
 
     for camera_name in cameras:
-        output_video = output_dir / f"project_{camera_name}_pose_fusion_learnable_{timestamp}.mp4"
+        output_video = output_dir / f"project_{camera_name}_optimized_learnable_{timestamp}.mp4"
         create_project2d_animation(
             camera_name=camera_name,
             config=config,
