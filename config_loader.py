@@ -9,11 +9,7 @@ ALLOWED_STAGES = {
     "fusion",
     "learnable",
     "visualization",
-    "pose_fusion",
-    "postprocess",
-    "learnable_visualization",
     "refinement",
-    "hbh",
 }
 
 
@@ -56,7 +52,6 @@ def validate_config(config):
         "learnable_output_dir",
         "visualization_output_dir",
         "refinement_output_dir",
-        "hbh_output_dir",
     ]
 
     for key in required_paths:
