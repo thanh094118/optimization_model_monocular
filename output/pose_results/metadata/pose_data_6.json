@@ -1,0 +1,15 @@
+{
+    "metadata": {
+        "camera_sync": {
+            "offset": 0,
+            "left_start": 0,
+            "right_start": 0,
+            "frame_count": 101,
+            "method": "paper"
+        },
+        "source_frame_indices": {
+            "camera1": 5,
+            "camera2": 5
+        }
+    }
+}

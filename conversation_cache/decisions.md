@@ -1,0 +1,34 @@
+# Decisions
+
+- Preprocess camera profiles are the handoff point for WHAM 2D tracking confidence. Store mapped `tracking_results_for_reproj` keypoints under `2D_camera_cam1` / `2D_camera_cam2` in `data_cam*.json`, and store `init_betas` as both `shape` and `init_betas` for clarity/backward readability.
+- Fusion `joint_confidence` should combine the existing geometric/visibility harmonic precision with WHAM 2D detection confidence using a harmonic mean. `K1` and `K2` are selected from this blended confidence, not from either signal alone.
+- Fusion debug outputs are first-class evaluation/visualization variants when present. `debug1` and `debug2` are exposed as `fusion_debug1` and `fusion_debug2` modules without changing the original debug JSON layout.
+- Keep the original visualization project video unchanged (`pose`, `fusion`, `learnable`). Export fusion debug projection as a separate debug-only video (`fusion_debug1`, `fusion_debug2`) when debug frame data exists.
+- Remove `fusion_pipeline/core.py`; keep orchestration in `fusion_pipeline/pipeline.py` and responsibility-specific logic in detection/correction/optimization modules.
+- Treat occlusion/visibility as detection logic, not generic geometry. `compute_visibility_from_mesh_vertices` and torso-mask state live in `fusion_pipeline/detection.py`.
+- Root-level cache markdown files should not be kept as parallel memory sources. Consolidate them into `conversation_cache/` and remove the root copies.
+- Consolidated root-level decisions:
+  - calibration files are discovered dynamically via `camera_*.calibration` sorted by suffix ID
+  - project model paths should be centralized under `paths`, avoiding duplicated preprocess-specific model path config
+- Fusion `M` now means cross-camera limb rotation-direction disagreement. It is computed from parent-to-joint vectors against the torso normal for configured joints only, instead of classifying every joint as before/after relative to the torso center plane.
+- Keep fusion processing separated by responsibility:
+  - `detection.py` detects cross-view disagreement and confidence groups without mutating input keypoints.
+  - `correction.py` performs large RANSAC/Umeyama-based replacement and rotation-mismatch correction.
+  - `optimization.py` performs smaller constrained refinements and temporal smoothing.
+  - `core.py` orchestrates the frame pipeline and re-exports existing helper names for compatibility.
+- Remove `hbh_pipeline` entirely from the active system rather than keeping a dormant stage switch.
+- Keep `AGENTS.md` stable for long-term operating rules; put transient task progress in `conversation_cache/*`.
+- Treat calibration translation in this project as `tvec` (extrinsic 4th column), not camera center.
+- For this calibration source, HBH projection uses `[R|tvec]`; using `-R@t` is incorrect and corrupts both triangulation and reprojection.
+- Remove duplicate standalone HBH execution path and consolidate active HBH runtime logic in `hbh_pipeline/executor.py`.
+- Keep method-specific HBH outputs in per-method directories to isolate and compare triangulation outputs clearly.
+- Run HBH evaluation and visualization by default as part of HBH flow to keep outputs synchronized.
+- For readability, HBH visualization text is rendered in a dedicated header panel with high-contrast white text and black stroke.
+- Preserve backward compatibility when reading legacy camera profiles by accepting `xyz` as fallback if `tvec` is absent.
+- Learnable stage should align with official Learnable-SMPLify temporal formulation when fidelity to the paper/model behavior is required: inference is defined on transitions (`X_{t-s}, X_t`) with iterative state propagation, not isolated per-frame fitting.
+- Keep learnable stage config backward-compatible with the existing repository pipeline config by accepting legacy `learnable` keys and auto-filling Learnable-SMPLify repo/config/model paths when absent.
+- For this repository integration, learnable inference input is keypoints-only (`fused_output_dir/keypoints3d`); fused metadata files are not consumed by learnable computation.
+- To tolerate upstream hardcoded paths and CUDA-only assumptions, keep adapter-level compatibility patches in `learnable_pipeline/executor.py` (path synchronization + CPU-safe monkey patches) instead of modifying vendored upstream source files directly.
+- Keep `optimization_pipeline` as a standalone workflow until explicit integration is requested; current `main.py`/`pipeline.py` runtime remains unchanged and does not execute it as a selectable stage.
+- For the standalone optimization refactor, keep each phase script self-contained and configuration-driven via `optimization_pipeline/configs.yml`; duplicate small helpers inside scripts is preferred over introducing local imports between phase files.
+- Use pickle-backed intermediate files by default for standalone optimization phases so nested `params`/`cameras` payloads can pass between scripts without repo-specific serializers.

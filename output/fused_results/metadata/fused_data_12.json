@@ -1,0 +1,115 @@
+{
+    "M": [],
+    "M_after": [],
+    "M_resolved": false,
+    "K1": [
+        "right_ankle",
+        "right_foot"
+    ],
+    "K2": [
+        "left_foot",
+        "neck"
+    ],
+    "A_new": [
+        "left_ankle",
+        "left_elbow",
+        "left_foot",
+        "left_hand",
+        "left_hip",
+        "left_knee",
+        "left_shoulder",
+        "neck",
+        "right_ankle",
+        "right_elbow",
+        "right_foot",
+        "right_hand",
+        "right_hip",
+        "right_knee",
+        "right_shoulder"
+    ],
+    "F": [],
+    "before_stats": [
+        0.012427091300023257,
+        0.018273243260754787,
+        0.015367651566620287,
+        0.01542650506955784,
+        0.0001260771656782301
+    ],
+    "after_stats": [
+        0.012427091300023257,
+        0.018273243260754787,
+        0.015367651566620287,
+        0.01542650506955784,
+        0.0001260771656782301
+    ],
+    "joint_confidence": {
+        "camera1": {
+            "left_ankle": 0.8633539582697842,
+            "left_elbow": 0.8903640849285187,
+            "left_foot": 0.6094353048745325,
+            "left_hand": 0.8514765933018005,
+            "left_hip": 0.8656314569708975,
+            "left_knee": 0.8479671265097769,
+            "left_shoulder": 0.8858401005999975,
+            "neck": 0.810959598867333,
+            "right_ankle": 0.8878778368867873,
+            "right_elbow": 0.8777425603969186,
+            "right_foot": 0.9403801262071477,
+            "right_hand": 0.8463085652104894,
+            "right_hip": 0.8622638859809426,
+            "right_knee": 0.8777070208898854,
+            "right_shoulder": 0.8948214995933822
+        },
+        "camera2": {
+            "left_ankle": 0.8654648002204696,
+            "left_elbow": 0.8875788650475855,
+            "left_foot": 0.9133044893065246,
+            "left_hand": 0.8612810186466855,
+            "left_hip": 0.8800698243030466,
+            "left_knee": 0.8401970000346765,
+            "left_shoulder": 0.879345014023132,
+            "neck": 0.9161349989038171,
+            "right_ankle": 0.8495733878181895,
+            "right_elbow": 0.8685762564530405,
+            "right_foot": 0.9129168217637702,
+            "right_hand": 0.8556435154082729,
+            "right_hip": 0.8783565668602259,
+            "right_knee": 0.877297883893117,
+            "right_shoulder": 0.8723665001178887
+        }
+    },
+    "vis1": {
+        "left_ankle": true,
+        "left_elbow": true,
+        "left_foot": true,
+        "left_hand": true,
+        "left_hip": true,
+        "left_knee": true,
+        "left_shoulder": true,
+        "neck": true,
+        "right_ankle": true,
+        "right_elbow": true,
+        "right_foot": true,
+        "right_hand": true,
+        "right_hip": true,
+        "right_knee": true,
+        "right_shoulder": true
+    },
+    "vis2": {
+        "left_ankle": true,
+        "left_elbow": true,
+        "left_foot": true,
+        "left_hand": true,
+        "left_hip": true,
+        "left_knee": true,
+        "left_shoulder": true,
+        "neck": true,
+        "right_ankle": true,
+        "right_elbow": true,
+        "right_foot": true,
+        "right_hand": true,
+        "right_hip": true,
+        "right_knee": true,
+        "right_shoulder": true
+    }
+}
