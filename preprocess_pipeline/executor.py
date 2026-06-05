@@ -13,8 +13,8 @@ from preprocess_pipeline.config import (
     DEFAULT_SMPL_MODEL_PATH,
 )
 from preprocess_pipeline.calib import export_camera_jsons, resolve_selected_offset_from_camera_profile
+from preprocess_pipeline.extract_2d import export_tracking_2d_to_camera_profiles
 from preprocess_pipeline.logs import log_module_done, log_module_start, log_offset_selected
-from preprocess_pipeline.offset_colab import compute_offset_from_pkls as compute_colab_offset
 from preprocess_pipeline.offset_paper import compute_offset_from_pkls as compute_paper_offset
 
 EXTENSIONS = [".mp4", ".MP4"]
@@ -81,21 +81,19 @@ def extract_images(input_folder: str, output_folder: str, ffmpeg: str = "ffmpeg"
         )
 
 
-def run_offset_estimation(input_folder: str, smpl_model_path: str) -> tuple[int, int]:
+def run_offset_estimation(input_folder: str, smpl_model_path: str) -> int:
     pkl_files = sorted(glob(join(input_folder, "*.pkl")))
     if len(pkl_files) < 2:
         print(f"Bỏ qua offset: cần ít nhất 2 file .pkl trong {input_folder}")
-        return 0, 0
+        return 0
 
     pkl1, pkl2 = pkl_files[0], pkl_files[1]
     print(f"[Preprocess] Offset input | cam1={os.path.basename(pkl1)} | cam2={os.path.basename(pkl2)}")
 
-    colab_offset = compute_colab_offset(pkl1, pkl2, smpl_model_path, detail_print=False)
     paper_offset = compute_paper_offset(pkl1, pkl2, smpl_model_path, verbose=False)
 
-    print(f"[Preprocess] Offset colab={colab_offset}")
     print(f"[Preprocess] Offset paper={paper_offset}")
-    return int(paper_offset), int(colab_offset)
+    return int(paper_offset)
 
 
 def run_preprocess(config: dict) -> tuple[int, str]:
@@ -115,11 +113,12 @@ def run_preprocess(config: dict) -> tuple[int, str]:
         restart=False,
         debug=False,
     )
-    offset_paper, offset_colab = run_offset_estimation(
+    offset_paper = run_offset_estimation(
         input_folder=input_dir,
         smpl_model_path=smpl_model_path,
     )
-    export_camera_jsons(config, offset_paper=offset_paper, offset_colab=offset_colab)
+    export_camera_jsons(config, offset_paper=offset_paper)
+    export_tracking_2d_to_camera_profiles(config)
 
     selected_offset, selected_method, selected_path = resolve_selected_offset_from_camera_profile(config)
     config.setdefault("runtime", {})["selected_offset"] = selected_offset
