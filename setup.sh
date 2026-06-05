@@ -47,7 +47,7 @@ echo "========================================"
 declare -A FILE_IDS=(
     ["models/SMPL_NEUTRAL.pkl"]="1rg2QnvmMgoS7Cpok3X0RIie3ZVwW_c0U"
     ["models/J_regressor_body25.npy"]="1SCsg3XuDEMkCyVO4s6p23Mj-R-7su9uQ"
-    ["models/yolo26x-pose.pt"]="1iAVLQa0NWH3ICBpkBrbTUKU6DQPvwUI9"
+    ["models/best_ckpt.pth.tar"]="1PlrsPWJvH6KaUOGFoWYc_24vsbJd1PZA"
     ["models/smpl_partSegmentation_mapping.pkl"]="1P6h-MOdTvb5q4EPntJmsEQwNurut6u2I"    
     ["input/cameraIntrinsics.pickle"]="1Lhg4qY8GEg4V6ZE8nK4rD7mP4PAbE9DS"
     ["input/wham_opencap_1.pkl"]="12xU0FGZpFaWOcQ6JKHUqyJdQClL4I1of"
