@@ -53,8 +53,8 @@ fusion:
     max_iter: 1000
 
   debug:
-    save_debug1: true
-    save_debug2: true
+    save_debug1: false
+    save_debug2: false
 
 learnable:
   enabled: true
