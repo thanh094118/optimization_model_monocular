@@ -321,7 +321,14 @@ def _load_pa_mpjpe_frame_map(csv_path: Path) -> Dict[int, Dict[str, float]]:
 def _build_pa_mpjpe_maps(paths: dict) -> Dict[str, Dict[str, Dict[int, Dict[str, float]]]]:
     out: Dict[str, Dict[str, Dict[int, Dict[str, float]]]] = {}
     eval_dir = Path(paths.get("evaluation_output_dir", "output/evaluation_results"))
-    for module_name in ("pose", "fusion", "learnable"):
+    module_names = {"pose", "fusion", "learnable"}
+    for csv_path in eval_dir.glob("pa_mpjpe_*_cam*.csv"):
+        name = csv_path.stem
+        match = re.match(r"pa_mpjpe_(.+)_cam[12]$", name)
+        if match:
+            module_names.add(match.group(1))
+
+    for module_name in sorted(module_names):
         out[module_name] = {}
         for cam in ("camera1", "camera2"):
             cam_tag = "cam1" if cam == "camera1" else "cam2"
@@ -330,17 +337,58 @@ def _build_pa_mpjpe_maps(paths: dict) -> Dict[str, Dict[str, Dict[int, Dict[str,
     return out
 
 
-def create_project2d_animation(camera_name: str, config: dict, paths: dict, output_video: Path, target_fps: int, dpi: int = 100) -> None:
-    pose_map = _load_camera_keypoints_by_frame(Path(paths["pose_output_dir"]) / "keypoints3d", "pose_data_*.json", camera_name)
-    fusion_map = _load_camera_keypoints_by_frame(Path(paths["fused_output_dir"]) / "keypoints3d", "fused_data_*.json", camera_name)
-    learn_map = _load_camera_keypoints_by_frame(Path(paths["learnable_output_dir"]) / "keypoints3d", "learnable_frame_*.json", camera_name)
+def _project_module_specs(paths: dict, camera_name: str) -> list[dict]:
+    fused_dir = Path(paths["fused_output_dir"])
+    return [
+        {
+            "name": "pose",
+            "title": "Pose 3D->2D",
+            "frames": _load_camera_keypoints_by_frame(Path(paths["pose_output_dir"]) / "keypoints3d", "pose_data_*.json", camera_name),
+        },
+        {
+            "name": "fusion",
+            "title": "Fusion 3D->2D",
+            "frames": _load_camera_keypoints_by_frame(fused_dir / "keypoints3d", "fused_data_*.json", camera_name),
+        },
+        {
+            "name": "learnable",
+            "title": "Learnable 3D->2D",
+            "frames": _load_camera_keypoints_by_frame(Path(paths["learnable_output_dir"]) / "keypoints3d", "learnable_frame_*.json", camera_name),
+        },
+    ]
+
+
+def _debug_project_module_specs(paths: dict, camera_name: str) -> list[dict]:
+    fused_dir = Path(paths["fused_output_dir"])
+    specs = []
+    for debug_name, title in (("debug1", "Fusion Debug1 3D->2D"), ("debug2", "Fusion Debug2 3D->2D")):
+        debug_dir = fused_dir / debug_name
+        if debug_dir.exists():
+            frame_map = _load_camera_keypoints_by_frame(debug_dir, "fused_data_*.json", camera_name)
+            if frame_map:
+                specs.append({
+                    "name": f"fusion_{debug_name}",
+                    "title": title,
+                    "frames": frame_map,
+                })
+    return specs
+
+
+def _create_project2d_animation_for_specs(camera_name: str, config: dict, paths: dict, output_video: Path, target_fps: int, module_specs: list[dict], dpi: int = 100) -> None:
+    if not module_specs:
+        print(f"[Visualization] Skip project video for {camera_name}: no module frames.")
+        return
     image_dir = _resolve_image_dir(paths, camera_name)
     image_map = {_frame_index(p): p for p in sorted(image_dir.glob("images_frame_*.jpg"), key=_frame_index)}
     if not image_map:
         image_map = {_frame_index(p): p for p in sorted(image_dir.glob("*.jpg"), key=_frame_index)}
 
-    common_ids = sorted(set(pose_map) & set(fusion_map) & set(learn_map) & set(image_map))
+    frame_sets = [set(spec["frames"]) for spec in module_specs]
+    common_ids = sorted(set.intersection(*frame_sets, set(image_map)))
     common_ids = [i for i in common_ids if i >= 1]
+    max_frames = config.get("visualization", {}).get("max_frames")
+    if max_frames is not None:
+        common_ids = common_ids[:int(max_frames)]
     if not common_ids:
         raise ValueError(f"No common frame ids for {camera_name} in project2d flow.")
 
@@ -352,11 +400,9 @@ def create_project2d_animation(camera_name: str, config: dict, paths: dict, outp
     cx, cy = float(intr[0, 2]), float(intr[1, 2])
 
     frame_interval = 1000 / max(target_fps, 1)
-    fig = plt.figure(figsize=(24, 8))
-    axes = [fig.add_subplot(131), fig.add_subplot(132), fig.add_subplot(133)]
-    titles = ["Pose 3D->2D", "Fusion 3D->2D", "Learnable 3D->2D"]
-    modules = [pose_map, fusion_map, learn_map] 
-    module_names = ["pose", "fusion", "learnable"]
+    n_cols = len(module_specs)
+    fig = plt.figure(figsize=(8 * n_cols, 8))
+    axes = [fig.add_subplot(1, n_cols, i + 1) for i in range(n_cols)]
     pa_mpjpe_maps = _build_pa_mpjpe_maps(paths)
 
     def draw_overlay(img_bgr, joints):
@@ -376,7 +422,10 @@ def create_project2d_animation(camera_name: str, config: dict, paths: dict, outp
     def update(idx):
         frame_id = common_ids[idx]
         base = cv2.imread(str(image_map[frame_id]))
-        for ax, title, data_map, module_name in zip(axes, titles, modules, module_names):
+        for ax, spec in zip(axes, module_specs):
+            title = spec["title"]
+            data_map = spec["frames"]
+            module_name = spec["name"]
             ax.cla()
             ax.imshow(draw_overlay(base, data_map[frame_id]))
             metrics = pa_mpjpe_maps.get(module_name, {}).get(camera_name, {}).get(frame_id, {})
@@ -398,6 +447,30 @@ def create_project2d_animation(camera_name: str, config: dict, paths: dict, outp
     animation.save(str(output_video), writer="ffmpeg", fps=target_fps, dpi=dpi)
     plt.close(fig)
     print(f"[Visualization] Saved project video: {output_video}")
+
+
+def create_project2d_animation(camera_name: str, config: dict, paths: dict, output_video: Path, target_fps: int, dpi: int = 100) -> None:
+    _create_project2d_animation_for_specs(
+        camera_name=camera_name,
+        config=config,
+        paths=paths,
+        output_video=output_video,
+        target_fps=target_fps,
+        module_specs=_project_module_specs(paths, camera_name),
+        dpi=dpi,
+    )
+
+
+def create_debug_project2d_animation(camera_name: str, config: dict, paths: dict, output_video: Path, target_fps: int, dpi: int = 100) -> None:
+    _create_project2d_animation_for_specs(
+        camera_name=camera_name,
+        config=config,
+        paths=paths,
+        output_video=output_video,
+        target_fps=target_fps,
+        module_specs=_debug_project_module_specs(paths, camera_name),
+        dpi=dpi,
+    )
 
 
 def create_comparison_animation(
@@ -537,5 +610,17 @@ def run_visualization(config: dict) -> None:
             target_fps=target_fps,
             dpi=dpi,
         )
+        debug_specs = _debug_project_module_specs(paths, camera_name)
+        if debug_specs:
+            debug_modules = "_".join(spec["name"] for spec in debug_specs)
+            debug_output_video = output_dir / f"project_{camera_name}_{debug_modules}_{timestamp}.mp4"
+            create_debug_project2d_animation(
+                camera_name=camera_name,
+                config=config,
+                paths=paths,
+                output_video=debug_output_video,
+                target_fps=target_fps,
+                dpi=dpi,
+            )
 
     log_done(str(output_dir))

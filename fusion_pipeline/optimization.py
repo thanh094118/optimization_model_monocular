@@ -1,13 +1,20 @@
 import numpy as np
 from scipy.optimize import minimize
 
-from fusion_pipeline.config import HEIGHT, RIGID_BONES_RATIO
-from fusion_pipeline.geometry import _as_xyz
+from fusion_pipeline.config import (
+    BONE_LENGTH_MAX_SCALE,
+    BONE_LENGTH_MIN_SCALE,
+    DEFAULT_OCCLUDED_FACTOR,
+    HEIGHT,
+    HUBER_DELTA,
+    RIGID_BONES_RATIO,
+)
+from fusion_pipeline.detector import as_xyz
 
 
-def get_diff_f(f_name, anchors, cam1, cam2, conf1=None, conf2=None, vis1=None, vis2=None, occluded_factor=0.25):
-    p1_f = _as_xyz(cam1[f_name])
-    p2_f = _as_xyz(cam2[f_name])
+def get_diff_f(f_name, anchors, cam1, cam2, conf1=None, conf2=None, vis1=None, vis2=None, occluded_factor=DEFAULT_OCCLUDED_FACTOR):
+    p1_f = as_xyz(cam1[f_name])
+    p2_f = as_xyz(cam2[f_name])
     sum_wdiff, sum_w = 0.0, 0.0
     for a in anchors:
         ca1 = float(conf1.get(a, 1.0)) if conf1 else 1.0
@@ -15,14 +22,14 @@ def get_diff_f(f_name, anchors, cam1, cam2, conf1=None, conf2=None, vis1=None, v
         va1 = 1.0 if (vis1 and vis1.get(a, True)) else float(occluded_factor)
         va2 = 1.0 if (vis2 and vis2.get(a, True)) else float(occluded_factor)
         w = ((ca1 + ca2) / 2.0) * (va1 * va2)
-        d1 = np.linalg.norm(p1_f - _as_xyz(cam1[a]))
-        d2 = np.linalg.norm(p2_f - _as_xyz(cam2[a]))
+        d1 = np.linalg.norm(p1_f - as_xyz(cam1[a]))
+        d2 = np.linalg.norm(p2_f - as_xyz(cam2[a]))
         sum_wdiff += w * abs(d1 - d2)
         sum_w += w
     return sum_wdiff / max(sum_w, 1e-12)
 
 
-def calculate_stats(cam1, cam2, f_list, anchors, conf1=None, conf2=None, vis1=None, vis2=None, occluded_factor=0.25, f_weights=None, huber_delta=0.05):
+def calculate_stats(cam1, cam2, f_list, anchors, conf1=None, conf2=None, vis1=None, vis2=None, occluded_factor=DEFAULT_OCCLUDED_FACTOR, f_weights=None, huber_delta=HUBER_DELTA):
     if not f_list or not anchors:
         return 0.0, 0.0, 0.0, 0.0, 0.0
     diffs = [get_diff_f(f, anchors, cam1, cam2, conf1=conf1, conf2=conf2, vis1=vis1, vis2=vis2, occluded_factor=occluded_factor) for f in f_list]
@@ -47,9 +54,9 @@ def compute_dynamic_scale(cam_dict, f_list, ratios):
     return (sum_len / sum_ratio) if sum_ratio > 0 else HEIGHT
 
 
-def optimize_f_points(data, anchors, f_list, conf1=None, conf2=None, vis1=None, vis2=None, occluded_factor=0.25, regularization=False, regularization_lambda=1.0, prev_data=None, temporal_lambda=1.0, max_iter=1000):
-    cam1 = {k: _as_xyz(v) for k, v in data["camera1"].items()}
-    cam2 = {k: _as_xyz(v) for k, v in data["camera2"].items()}
+def optimize_f_points(data, anchors, f_list, conf1=None, conf2=None, vis1=None, vis2=None, occluded_factor=DEFAULT_OCCLUDED_FACTOR, regularization=False, regularization_lambda=1.0, prev_data=None, temporal_lambda=1.0, max_iter=1000):
+    cam1 = {k: as_xyz(v) for k, v in data["camera1"].items()}
+    cam2 = {k: as_xyz(v) for k, v in data["camera2"].items()}
     f_weights = {}
     for name in f_list:
         c1 = float(conf1.get(name, 1.0)) if conf1 else 1.0
@@ -94,7 +101,7 @@ def optimize_f_points(data, anchors, f_list, conf1=None, conf2=None, vis1=None, 
         for i, name in enumerate(f_list):
             p1[name] = x[i * 3:i * 3 + 3]
             p2[name] = x[(num_f + i) * 3:(num_f + i) * 3 + 3]
-        _, _, _, _, huber_loss = calculate_stats(p1, p2, f_list, anchors, conf1=conf1, conf2=conf2, vis1=vis1, vis2=vis2, occluded_factor=occluded_factor, f_weights=f_weights, huber_delta=0.05)
+        _, _, _, _, huber_loss = calculate_stats(p1, p2, f_list, anchors, conf1=conf1, conf2=conf2, vis1=vis1, vis2=vis2, occluded_factor=occluded_factor, f_weights=f_weights, huber_delta=HUBER_DELTA)
         obj_val = huber_loss
         if regularization:
             obj_val += regularization_lambda * proximity_penalty(x)
@@ -109,8 +116,8 @@ def optimize_f_points(data, anchors, f_list, conf1=None, conf2=None, vis1=None, 
         if child not in cam1 or parent not in cam1 or (child not in f_list and parent not in f_list):
             continue
         target1 = ratio * dyn_scale_cam1
-        lower_sq1 = (0.85 * target1) ** 2
-        upper_sq1 = (1.15 * target1) ** 2
+        lower_sq1 = (BONE_LENGTH_MIN_SCALE * target1) ** 2
+        upper_sq1 = (BONE_LENGTH_MAX_SCALE * target1) ** 2
 
         def constr_lower1(x, c=child, p=parent, low=lower_sq1):
             pts = dict(cam1)
@@ -130,8 +137,8 @@ def optimize_f_points(data, anchors, f_list, conf1=None, conf2=None, vis1=None, 
         constraints.append({"type": "ineq", "fun": constr_upper1})
 
         target2 = ratio * dyn_scale_cam2
-        lower_sq2 = (0.85 * target2) ** 2
-        upper_sq2 = (1.15 * target2) ** 2
+        lower_sq2 = (BONE_LENGTH_MIN_SCALE * target2) ** 2
+        upper_sq2 = (BONE_LENGTH_MAX_SCALE * target2) ** 2
 
         def constr_lower2(x, c=child, p=parent, low=lower_sq2):
             pts = dict(cam2)

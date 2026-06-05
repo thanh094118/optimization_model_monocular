@@ -3,12 +3,12 @@ from itertools import combinations
 import numpy as np
 
 from fusion_pipeline.config import RANSAC_MAX_COMBOS, RANSAC_THRESHOLD
-from fusion_pipeline.geometry import _as_xyz
+from fusion_pipeline.detector import as_xyz
 
 
 def _to_arrays(cam1, cam2, names):
-    src = np.array([_as_xyz(cam1[name]) for name in names], dtype=float)
-    dst = np.array([_as_xyz(cam2[name]) for name in names], dtype=float)
+    src = np.array([as_xyz(cam1[name]) for name in names], dtype=float)
+    dst = np.array([as_xyz(cam2[name]) for name in names], dtype=float)
     return src, dst
 
 
@@ -32,7 +32,7 @@ def estimate_umeyama(src, dst):
 
 def apply_similarity(point, transform):
     scale, r, t = transform
-    return scale * (r @ _as_xyz(point)) + t
+    return scale * (r @ as_xyz(point)) + t
 
 
 def ransac_umeyama(cam1, cam2, names, threshold=RANSAC_THRESHOLD, max_combos=RANSAC_MAX_COMBOS, rng=None):
