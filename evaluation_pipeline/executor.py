@@ -297,6 +297,21 @@ def _write_module_csv(module_name: str, cam: str, result: dict, output_dir: Path
         ])
 
 
+def _build_module_inputs(paths: dict) -> dict[str, Path]:
+    module_inputs = {
+        module_name: Path(paths[path_key]) / MODULE_KEYPOINT_SUBDIR
+        for module_name, path_key in MODULE_INPUT_KEYS.items()
+    }
+
+    fused_dir = Path(paths.get("fused_output_dir", "output/fused_results"))
+    for debug_name in ("debug1", "debug2"):
+        debug_dir = fused_dir / debug_name
+        if debug_dir.exists():
+            module_inputs[f"fusion_{debug_name}"] = debug_dir
+
+    return module_inputs
+
+
 def run_evaluation(config: dict) -> None:
     paths = config["paths"]
     runtime_cfg = config.get("runtime", {})
@@ -310,10 +325,7 @@ def run_evaluation(config: dict) -> None:
     testcase_name = eval_cfg.get("testcase_name", "testcase1")
     output_dir = Path(paths.get("evaluation_output_dir", "output/evaluation_results"))
 
-    module_inputs = {
-        module_name: Path(paths[path_key]) / MODULE_KEYPOINT_SUBDIR
-        for module_name, path_key in MODULE_INPUT_KEYS.items()
-    }
+    module_inputs = _build_module_inputs(paths)
 
     if runtime_cfg.get("clean_output", True):
         output_dir.mkdir(parents=True, exist_ok=True)
