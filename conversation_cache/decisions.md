@@ -4,18 +4,19 @@
 - Fusion `joint_confidence` should combine the existing geometric/visibility harmonic precision with WHAM 2D detection confidence using a harmonic mean. `K1` and `K2` are selected from this blended confidence, not from either signal alone.
 - Fusion debug outputs are first-class evaluation/visualization variants when present. `debug1` and `debug2` are exposed as `fusion_debug1` and `fusion_debug2` modules without changing the original debug JSON layout.
 - Keep the original visualization project video unchanged (`pose`, `fusion`, `learnable`). Export fusion debug projection as a separate debug-only video (`fusion_debug1`, `fusion_debug2`) when debug frame data exists.
-- Remove `fusion_pipeline/core.py`; keep orchestration in `fusion_pipeline/pipeline.py` and responsibility-specific logic in detection/correction/optimization modules.
-- Treat occlusion/visibility as detection logic, not generic geometry. `compute_visibility_from_mesh_vertices` and torso-mask state live in `fusion_pipeline/detection.py`.
+- Remove `fusion_pipeline/core.py` and `fusion_pipeline/pipeline.py`; keep fusion orchestration in `fusion_pipeline/executor.py`.
+- Treat occlusion/visibility as detector logic, not generic geometry. `compute_visibility_from_mesh_vertices` and torso-mask state live in `fusion_pipeline/detector.py`.
 - Root-level cache markdown files should not be kept as parallel memory sources. Consolidate them into `conversation_cache/` and remove the root copies.
 - Consolidated root-level decisions:
   - calibration files are discovered dynamically via `camera_*.calibration` sorted by suffix ID
   - project model paths should be centralized under `paths`, avoiding duplicated preprocess-specific model path config
 - Fusion `M` now means cross-camera limb rotation-direction disagreement. It is computed from parent-to-joint vectors against the torso normal for configured joints only, instead of classifying every joint as before/after relative to the torso center plane.
 - Keep fusion processing separated by responsibility:
-  - `detection.py` detects cross-view disagreement and confidence groups without mutating input keypoints.
+  - `detector.py` detects cross-view disagreement and confidence groups without mutating input keypoints.
   - `correction.py` performs large RANSAC/Umeyama-based replacement and rotation-mismatch correction.
   - `optimization.py` performs smaller constrained refinements and temporal smoothing.
-  - `core.py` orchestrates the frame pipeline and re-exports existing helper names for compatibility.
+  - `executor.py` orchestrates the frame pipeline and writes stage outputs.
+- Keep static fusion maps and rule constants in `fusion_pipeline/config.py`, including parent-joint rotation maps, non-replaceable anchors, torso part IDs, occlusion joint lists, bone ratios, and confidence/optimization thresholds.
 - Remove `hbh_pipeline` entirely from the active system rather than keeping a dormant stage switch.
 - Keep `AGENTS.md` stable for long-term operating rules; put transient task progress in `conversation_cache/*`.
 - Treat calibration translation in this project as `tvec` (extrinsic 4th column), not camera center.

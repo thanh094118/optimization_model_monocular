@@ -1,6 +1,47 @@
 # Current Status
 
-Last updated: 2026-06-05 14:46 +07
+Last updated: 2026-06-05 15:32 +07
+
+## Fusion Module Structure Refactor
+
+- Refactored `fusion_pipeline` into the requested three-part module shape:
+  - functional phase files:
+    - `detector.py`: input normalization, limb-orientation mismatch detection, occlusion visibility detection, confidence blending, `M/K1/K2/L` grouping, fallback judgement
+    - `correction.py`: RANSAC/Umeyama similarity and large cross-view keypoint replacement
+    - `optimization.py`: constrained fine-tuning, temporal penalty, bone-length constraints, stats/losses
+  - execution script:
+    - `executor.py`: stage orchestration, input loading, per-frame flow, debug output, split keypoints/metadata output
+  - configuration/log group:
+    - `config.py`: output naming, RANSAC defaults, bone ratios, joint maps, occlusion maps, thresholds
+    - `logs.py`: CLI/runtime log text helpers
+- Deleted `fusion_pipeline/detection.py` and `fusion_pipeline/geometry.py`.
+- `run_phase3_pipeline(...)` remains in `executor.py`; public pipeline entry remains `fusion_pipeline.stage.run_fusion`.
+
+## Verification
+
+- Passed:
+  - `/home/thanh/miniconda3/envs/easymocap/bin/python -m compileall fusion_pipeline`
+  - `/home/thanh/miniconda3/envs/easymocap/bin/python -c 'from fusion_pipeline.stage import run_fusion; from fusion_pipeline.executor import run_phase3_pipeline; from fusion_pipeline.detector import detect_cross_view_errors, get_orientation_flag; from fusion_pipeline.correction import ransac_umeyama; from fusion_pipeline.optimization import optimize_f_points; print("fusion imports ok")'`
+  - direct smoke call to `run_phase3_pipeline(...)` with synthetic two-camera joints
+  - `/home/thanh/miniconda3/envs/easymocap/bin/python -c 'from config_loader import load_config; load_config("configs/pipeline.yml"); print("config ok")'`
+  - full import smoke for `main`, `pipeline`, pose/fusion/learnable/evaluation/visualization stages
+- Import smoke still emits the known Matplotlib writable-cache warning; it does not block imports.
+
+## Fusion Pipeline Grown Back Into Executor
+
+- Moved the frame-level fusion orchestrator back into `fusion_pipeline/executor.py`.
+- Deleted `fusion_pipeline/pipeline.py`; there is no separate fusion pipeline module anymore.
+- `run_phase3_pipeline(...)` now lives in `fusion_pipeline/executor.py` alongside the stage driver.
+- The external behavior of fusion output remains unchanged:
+  - debug JSONs still go to `output/fused_results/debug1/` and `debug2/`
+  - the main split output still goes to `keypoints3d/` and `metadata/`
+
+## Verification
+
+- Passed:
+  - `/home/thanh/miniconda3/envs/easymocap/bin/python -m compileall fusion_pipeline`
+  - `/home/thanh/miniconda3/envs/easymocap/bin/python -c 'from fusion_pipeline.stage import run_fusion; from fusion_pipeline.executor import run_phase3_pipeline; print("fusion imports ok")'`
+- `rg` confirms no remaining runtime imports of `fusion_pipeline.pipeline`.
 
 ## WHAM 2D Confidence Extraction And Fusion Confidence Blend
 
@@ -20,7 +61,7 @@ Last updated: 2026-06-05 14:46 +07
   - `shape`
   - `init_betas`
 - Fusion now loads these 2D camera confidence profiles and aligns confidence by `metadata.source_frame_indices` from pose metadata, with fallback to `frame_idx - 1` / `frame_idx`.
-- `fusion_pipeline/detection.py` now computes final `H1_all`/`H2_all` by harmonic-blending:
+- `fusion_pipeline/detector.py` now computes final `H1_all`/`H2_all` by harmonic-blending:
   - old geometric/visibility confidence
   - WHAM 2D keypoint confidence
 - `K1` and `K2` are computed from the new blended `H1_all`/`H2_all`.
@@ -78,15 +119,9 @@ Last updated: 2026-06-05 12:35 +07
 ## Fusion Core Removal And Detection Ownership
 
 - Removed `fusion_pipeline/core.py`.
-- Added `fusion_pipeline/pipeline.py` as the frame-level fusion orchestrator.
-- Updated `fusion_pipeline/executor.py` to import:
-  - `run_phase3_pipeline` from `fusion_pipeline.pipeline`
-  - `load_torso_mask` and `make_raw_judgement_fallback` from `fusion_pipeline.detection`
-- Moved occlusion visibility logic out of `fusion_pipeline/geometry.py` and into `fusion_pipeline/detection.py`.
-- `fusion_pipeline/geometry.py` now only contains low-level geometry helpers for this stage:
-  - `_as_xyz`
-  - `get_orientation_flag`
-  - `ROTATION_PARENT_JOINTS`
+- This historical section is superseded by the current `detector.py`/`correction.py`/`optimization.py` split above.
+- The frame-level fusion orchestrator now lives in `fusion_pipeline/executor.py`.
+- Occlusion visibility and orientation-mismatch detection now live in `fusion_pipeline/detector.py`.
 
 ## Consolidated Root Cache Notes
 
@@ -110,17 +145,13 @@ Last updated: 2026-06-05 12:23 +07
     - knee from hip to knee
     - ankle from knee to ankle
   - Non-target joints return `0`, so `M` now represents cross-camera limb rotation-direction disagreement, not generic before/after position relative to the torso plane.
-- Split `fusion_pipeline/core.py` into clearer functional modules:
-  - `detection.py`: cross-view error grouping, harmonic precision, fallback judgement
-  - `correction.py`: RANSAC/Umeyama similarity and large keypoint replacement/correction
-  - `optimization.py`: stats/losses, bone constraints, SLSQP fine-tuning
-  - `core.py`: frame-level orchestration and compatibility re-exports
+- Historical note: this split was superseded by the current `detector.py` / `correction.py` / `optimization.py` / `executor.py` structure.
 
 ## Verification
 
-- Passed:
+- Passed at that time:
   - `python -m compileall fusion_pipeline`
-  - `/home/thanh/miniconda3/envs/easymocap/bin/python -c 'from fusion_pipeline.stage import run_fusion; from fusion_pipeline.core import run_phase3_pipeline, make_raw_judgement_fallback, optimize_f_points, ransac_umeyama; from fusion_pipeline.geometry import get_orientation_flag; print("fusion imports ok")'`
+  - historical fusion import smoke for the then-current structure
   - `/home/thanh/miniconda3/envs/easymocap/bin/python -m compileall main.py config_loader.py pipeline.py compat.py json_io.py keypoints_map.py preprocess_pipeline pose_pipeline fusion_pipeline learnable_pipeline evaluation_pipeline visualization_pipeline refinement_pipeline`
   - `/home/thanh/miniconda3/envs/easymocap/bin/python -c 'import main, pipeline; from config_loader import load_config; from pose_pipeline.stage import run_pose_export; from fusion_pipeline.stage import run_fusion; from learnable_pipeline.stage import run_learnable_smplify; from evaluation_pipeline.stage import run_evaluation; from visualization_pipeline.stage import run_visualization; print("imports ok")'`
   - `/home/thanh/miniconda3/envs/easymocap/bin/python -c 'from config_loader import load_config; load_config("configs/pipeline.yml"); print("config ok")'`

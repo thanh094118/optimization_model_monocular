@@ -4,20 +4,64 @@ import pickle
 import numpy as np
 from scipy.spatial import ConvexHull
 
-from fusion_pipeline.config import RIGID_BONES_RATIO
-from fusion_pipeline.geometry import _as_xyz, get_orientation_flag
+from fusion_pipeline.config import (
+    CONFIDENCE_DELTA_CAP,
+    HARMONIC_ALPHA,
+    HARMONIC_BETA,
+    HARMONIC_EPSILON,
+    NON_REPLACEABLE_ANCHORS,
+    OCCLUSION_CHECK_JOINTS,
+    OCCLUSION_IMAGE_HEIGHT,
+    OCCLUSION_IMAGE_WIDTH,
+    OCCLUSION_NEIGHBORS,
+    ORIENTATION_EPSILON,
+    RIGID_BONES_RATIO,
+    ROTATION_PARENT_JOINTS,
+    TORSO_PART_IDS,
+)
 
-NON_REPLACEABLE_ANCHORS = {"left_hip", "left_shoulder", "right_hip", "right_shoulder"}
-W, H = 2048, 2048
-fx = fy = (W * W + H * H) ** 0.5
-cx, cy = W / 2.0, H / 2.0
-N_NEIGHBORS = 10
-TORSO_PART_IDS = {0, 3, 6, 9, 13, 14}
-OCCLUSION_CHECK_JOINTS = {
-    "left_elbow", "left_hand", "right_elbow", "right_hand",
-    "left_knee", "left_ankle", "right_knee", "right_ankle",
-}
+_FX = _FY = (OCCLUSION_IMAGE_WIDTH * OCCLUSION_IMAGE_WIDTH + OCCLUSION_IMAGE_HEIGHT * OCCLUSION_IMAGE_HEIGHT) ** 0.5
+_CX = OCCLUSION_IMAGE_WIDTH / 2.0
+_CY = OCCLUSION_IMAGE_HEIGHT / 2.0
 _TORSO_MASK = None
+
+
+def as_xyz(point):
+    arr = np.asarray(point, dtype=float)
+    if arr.shape != (3,):
+        raise ValueError("Expected shape (3,), got {}".format(arr.shape))
+    return arr
+
+
+_as_xyz = as_xyz
+
+
+def get_orientation_flag(joints, epsilon=ORIENTATION_EPSILON):
+    required = ("right_shoulder", "left_shoulder", "right_hip", "left_hip")
+    if not all(name in joints for name in required):
+        return {name: 0 for name in joints}
+    rs = as_xyz(joints["right_shoulder"])
+    ls = as_xyz(joints["left_shoulder"])
+    rh = as_xyz(joints["right_hip"])
+    lh = as_xyz(joints["left_hip"])
+    mid_shoulders = (rs + ls) / 2.0
+    mid_hips = (rh + lh) / 2.0
+    v_lr = rs - ls
+    v_spine = mid_shoulders - mid_hips
+    forward_vec = np.cross(v_lr, v_spine)
+    norm = float(np.linalg.norm(forward_vec))
+    if norm < 1e-8:
+        return {name: 0 for name in joints}
+    forward_vec /= norm
+    flags = {}
+    for name, pos in joints.items():
+        parent = ROTATION_PARENT_JOINTS.get(name)
+        if parent is None or parent not in joints:
+            flags[name] = 0
+            continue
+        dot = float(np.dot(as_xyz(pos) - as_xyz(joints[parent]), forward_vec))
+        flags[name] = 0 if abs(dot) < epsilon else (1 if dot > 0 else -1)
+    return flags
 
 
 def load_torso_mask(seg_path):
@@ -41,8 +85,8 @@ def load_torso_mask(seg_path):
 def _project_to_image(points_3d):
     X, Y, Z = points_3d[:, 0], points_3d[:, 1], points_3d[:, 2]
     valid = Z > 1e-6
-    u = np.where(valid, fx * (X / np.where(valid, Z, 1.0)) + cx, np.nan)
-    v = np.where(valid, fy * (Y / np.where(valid, Z, 1.0)) + cy, np.nan)
+    u = np.where(valid, _FX * (X / np.where(valid, Z, 1.0)) + _CX, np.nan)
+    v = np.where(valid, _FY * (Y / np.where(valid, Z, 1.0)) + _CY, np.nan)
     return np.stack([u, v], axis=1)
 
 
@@ -68,7 +112,7 @@ def _point_in_hull2d(pt, hull):
 
 def _local_torso_z(u_k, v_k, all_torso_uv, all_torso_z):
     dists_2d = np.sqrt((all_torso_uv[:, 0] - u_k) ** 2 + (all_torso_uv[:, 1] - v_k) ** 2)
-    k = min(N_NEIGHBORS, len(dists_2d))
+    k = min(OCCLUSION_NEIGHBORS, len(dists_2d))
     nn_idx = np.argpartition(dists_2d, k - 1)[:k]
     return float(all_torso_z[nn_idx].min())
 
@@ -84,11 +128,11 @@ def compute_visibility_from_mesh_vertices(joints, verts, occlusion_tau=0.05):
     for name, pos in joints.items():
         if name not in OCCLUSION_CHECK_JOINTS:
             continue
-        kp_3d = _as_xyz(pos)
+        kp_3d = as_xyz(pos)
         if kp_3d[2] <= 0:
             continue
-        u_k = fx * (kp_3d[0] / kp_3d[2]) + cx
-        v_k = fy * (kp_3d[1] / kp_3d[2]) + cy
+        u_k = _FX * (kp_3d[0] / kp_3d[2]) + _CX
+        v_k = _FY * (kp_3d[1] / kp_3d[2]) + _CY
         if not _point_in_hull2d(np.array([u_k, v_k]), hull_2d_obj):
             continue
         z_local = _local_torso_z(u_k, v_k, all_torso_uv, all_torso_z)
@@ -96,7 +140,16 @@ def compute_visibility_from_mesh_vertices(joints, verts, occlusion_tau=0.05):
     return visibility
 
 
-def compute_harmonic_precision(cam1, cam2, joint_names, vis1, vis2, alpha=0.001, beta=0.8, epsilon=1e-6):
+def compute_harmonic_precision(
+    cam1,
+    cam2,
+    joint_names,
+    vis1,
+    vis2,
+    alpha=HARMONIC_ALPHA,
+    beta=HARMONIC_BETA,
+    epsilon=HARMONIC_EPSILON,
+):
     neighbors = {}
     for child, parent in RIGID_BONES_RATIO.keys():
         neighbors.setdefault(child, []).append(parent)
@@ -109,7 +162,7 @@ def compute_harmonic_precision(cam1, cam2, joint_names, vis1, vis2, alpha=0.001,
                 P[name] = 0.0
                 continue
             C = 1.0 if vis.get(name, True) else 0.0
-            L = float(np.linalg.norm(_as_xyz(cam[name])))
+            L = float(np.linalg.norm(as_xyz(cam[name])))
             P[name] = C / (1.0 + alpha * (L ** 2))
         return P
 
@@ -145,7 +198,7 @@ def _confidence_value(confidence_by_joint, name):
     return max(0.0, value)
 
 
-def _harmonic_blend(base_confidence, external_confidence, epsilon=1e-6):
+def _harmonic_blend(base_confidence, external_confidence, epsilon=HARMONIC_EPSILON):
     if external_confidence is None:
         return float(base_confidence)
     base_confidence = max(0.0, float(base_confidence))
@@ -153,7 +206,7 @@ def _harmonic_blend(base_confidence, external_confidence, epsilon=1e-6):
     return float((2.0 * base_confidence * external_confidence) / (base_confidence + external_confidence + epsilon))
 
 
-def _blend_detection_confidences(joint_names, base_confidences, external_confidences):
+def _blend_detector_confidences(joint_names, base_confidences, external_confidences):
     return {
         name: _harmonic_blend(base_confidences[name], _confidence_value(external_confidences, name))
         for name in joint_names
@@ -171,11 +224,11 @@ def detect_cross_view_errors(cam1, cam2, names, vis1, vis2, confidence2d1=None, 
     }
 
     _, H1_old, H2_old = compute_harmonic_precision(cam1, cam2, names, vis1, vis2)
-    H1_all = _blend_detection_confidences(names, H1_old, confidence2d1)
-    H2_all = _blend_detection_confidences(names, H2_old, confidence2d2)
+    H1_all = _blend_detector_confidences(names, H1_old, confidence2d1)
+    H2_all = _blend_detector_confidences(names, H2_old, confidence2d2)
     all_weights = {name: (H1_all[name] + H2_all[name]) / 2.0 for name in names}
     abs_diffs = [abs(H1_all[n] - H2_all[n]) for n in names]
-    delta = min(float(np.percentile(abs_diffs, 75)) if abs_diffs else 0.0, 0.05)
+    delta = min(float(np.percentile(abs_diffs, 75)) if abs_diffs else 0.0, CONFIDENCE_DELTA_CAP)
     k1_set = {n for n in names if H1_all[n] > H2_all[n] + delta}
     k2_set = {n for n in names if H2_all[n] > H1_all[n] + delta}
     k1_set.difference_update(NON_REPLACEABLE_ANCHORS)

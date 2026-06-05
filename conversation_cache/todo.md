@@ -3,13 +3,15 @@
 - [x] Extract WHAM `tracking_results_for_reproj` 2D keypoints and `init_betas` into `data_cam*.json`.
 - [x] Blend WHAM 2D confidence into fusion `joint_confidence` before computing `K1` and `K2`.
 - [x] Remove `fusion_pipeline/core.py` after moving active logic to responsibility-specific modules.
-- [x] Move fusion occlusion visibility detection from `geometry.py` to `detection.py`.
+- [x] Merge `fusion_pipeline/pipeline.py` back into `fusion_pipeline/executor.py` and delete the extra file.
+- [x] Move fusion occlusion visibility detection from `geometry.py` to `detector.py`.
+- [x] Refactor `fusion_pipeline` into `detector.py`, `correction.py`, `optimization.py`, `executor.py`, and config/log files without changing pipeline entrypoints.
 - [x] Consolidate root-level cache markdown files into `conversation_cache/`.
 - [ ] Perform end-to-end testing of the pipeline with the new preprocess configurations.
 - [ ] Implement strict warnings when calibration mapping falls back to estimated intrinsics due to missing calibration files.
 - [ ] Verify evaluation module works properly with the updated output mappings.
 - [x] Redefine fusion `M` from torso-center before/after classification to parent-vector limb rotation-direction disagreement.
-- [x] Split fusion logic out of `core.py` into detection, correction, and optimization modules.
+- [x] Split fusion logic out of `core.py` into detector, correction, and optimization modules.
 - [x] Remove `hbh_pipeline` package and delete all runtime wiring from CLI/pipeline/config validation.
 - [x] Add `preprocess` as a selectable stage in CLI/config loader.
 - [x] Add `intrinsics_estimation` into `data_cam*.json` and intrinsics source switch in YAML.

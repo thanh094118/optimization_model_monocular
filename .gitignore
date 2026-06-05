@@ -1,18 +1,14 @@
-# models/
-# output/
-# conversation_cache/
-# *.md
-# *.mp4
-# __pycache__/
-# *.pyc
-# *.pyo
-# *.pyd
-# .pytest_cache/
-# *.pkl
-# *.pickle
-# *.taz
-# **/.codex
-# *.codex
-# **/.agents
-# *.agents
+models/
+output/
+conversation_cache/
+*.md
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+**/.codex
+*.codex
+**/.agents
+*.agents
 *Zone.Identifier
