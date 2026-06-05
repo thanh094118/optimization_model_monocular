@@ -6,17 +6,6 @@ runtime:
 preprocess:
   input_dir: "input"
   output_dir: "output/preprocess_results"
-  smpl_model_path: "models/SMPL_NEUTRAL.pkl"
-  offset:
-    method: "paper" # "paper" | "colab"
-    output_dir: "output/preprocess_results"
-  calibration:
-    file: "input/camera.calibration"
-    output_dir: "output/preprocess_results"
-    intrinsics_source: "intri_esti" # "intri_cam" | "intri_esti"
-    camera_name_map:
-      cam1: "2"
-      cam2: "8"
 
 paths:
   cam1_pkl: "input/wham_opencap_1.pkl"
@@ -69,7 +58,6 @@ fusion:
 
 learnable:
   enabled: true
-  # checkpoint: "models/real_best_ckpt.pth"
   checkpoint: "models/best_ckpt.pth.tar"
   lr: 0.03
   iterations: 80
