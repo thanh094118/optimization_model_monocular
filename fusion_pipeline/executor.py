@@ -4,8 +4,8 @@ import copy
 import joblib
 from json_io import read_json, write_json
 from fusion_pipeline.config import OUTPUT_SUBDIRS
-from fusion_pipeline.geometry import load_torso_mask
-from fusion_pipeline.core import run_phase3_pipeline, make_raw_judgement_fallback
+from fusion_pipeline.detection import load_torso_mask, make_raw_judgement_fallback
+from fusion_pipeline.pipeline import run_phase3_pipeline
 from fusion_pipeline.logs import log_disabled, log_done, log_occlusion
 
 
@@ -79,6 +79,53 @@ def _load_pose_frame(path: Path, metadata_dir: Path):
     return data
 
 
+def _load_2d_profile(config: dict, cam_id: str):
+    preprocess_dir = Path(config.get("preprocess", {}).get("output_dir", "output/preprocess_results"))
+    profile_path = preprocess_dir / f"data_{cam_id}.json"
+    if not profile_path.exists():
+        print(f"[Fusion] 2D confidence not found: {profile_path}")
+        return None
+    profile = read_json(profile_path)
+    payload = profile.get(f"2D_camera_{cam_id}")
+    if not isinstance(payload, dict):
+        print(f"[Fusion] 2D confidence missing in {profile_path.name}")
+        return None
+    keypoints = payload.get("keypoints")
+    if not isinstance(keypoints, dict):
+        print(f"[Fusion] 2D confidence keypoints missing in {profile_path.name}")
+        return None
+    return keypoints
+
+
+def _load_2d_profiles(config: dict) -> dict:
+    return {
+        "camera1": _load_2d_profile(config, "cam1"),
+        "camera2": _load_2d_profile(config, "cam2"),
+    }
+
+
+def _frame_confidence_from_profile(profile, source_idx, frame_idx: int):
+    if not profile:
+        return None
+    candidates = []
+    if source_idx is not None:
+        candidates.append(int(source_idx))
+    candidates.extend([frame_idx - 1, frame_idx])
+    for candidate in candidates:
+        data = profile.get(str(candidate))
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _confidence2d_for_frame(data: dict, frame_idx: int, profiles: dict) -> dict:
+    source_indices = data.get("metadata", {}).get("source_frame_indices", {})
+    return {
+        "camera1": _frame_confidence_from_profile(profiles.get("camera1"), source_indices.get("camera1"), frame_idx),
+        "camera2": _frame_confidence_from_profile(profiles.get("camera2"), source_indices.get("camera2"), frame_idx),
+    }
+
+
 def run_fusion(config: dict) -> None:
     paths = config["paths"]
     runtime_cfg = config.get("runtime", {})
@@ -117,6 +164,7 @@ def run_fusion(config: dict) -> None:
         load_torso_mask(paths.get("segmentation"))
 
     wham_loaded, verts_cam1, verts_cam2, n_frames_1, n_frames_2 = _load_verts_if_available(paths, occlusion_enabled)
+    confidence2d_profiles = _load_2d_profiles(config)
 
     keypoints_dir = input_dir / "keypoints3d"
     metadata_dir = input_dir / "metadata"
@@ -148,6 +196,7 @@ def run_fusion(config: dict) -> None:
 
         try:
             prev_opt = prev_result["optimized"] if prev_result and "optimized" in prev_result else None
+            confidence2d_by_cam = _confidence2d_for_frame(data, frame_idx, confidence2d_profiles)
             result = run_phase3_pipeline(
                 data,
                 verts_by_cam=verts_input,
@@ -162,6 +211,7 @@ def run_fusion(config: dict) -> None:
                 prev_optimized_data=prev_opt,
                 debug1_dir=debug1_dir,
                 debug2_dir=debug2_dir,
+                confidence2d_by_cam=confidence2d_by_cam,
             )
             occluded_keys = sorted(
                 {
