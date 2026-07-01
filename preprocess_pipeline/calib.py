@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import joblib
 import pickle
 from pathlib import Path
 import numpy as np
@@ -71,7 +72,41 @@ def build_intrinsics_dict(K: np.ndarray, W: int, H: int) -> dict:
         "calib_portrait_w": portrait_w,
     }
 
-def export_camera_jsons(config: dict, offset_paper: int) -> None:
+def _extract_person_payload(wham_data):
+    if isinstance(wham_data, dict):
+        if 0 in wham_data:
+            return wham_data[0]
+        if "0" in wham_data:
+            return wham_data["0"]
+        for value in wham_data.values():
+            if isinstance(value, dict):
+                return value
+    if isinstance(wham_data, list):
+        for value in wham_data:
+            if isinstance(value, dict):
+                return value
+    return None
+
+
+def _load_wham_camera_payload(pkl_path: Path) -> dict:
+    if not pkl_path.exists():
+        raise FileNotFoundError(f"WHAM PKL not found: {pkl_path}")
+    person = _extract_person_payload(joblib.load(pkl_path))
+    if person is None:
+        raise ValueError(f"Cannot extract person payload from WHAM PKL: {pkl_path}")
+    return person
+
+
+def _mean_shape_over_frames(shape_value) -> list[list[float]]:
+    shape = np.asarray(shape_value, dtype=np.float32)
+    if shape.ndim == 1:
+        shape = shape[None, :]
+    if shape.ndim != 2:
+        raise ValueError(f"Expected betas/shape to have ndim 1 or 2, got {shape.ndim}")
+    return shape.mean(axis=0, keepdims=True).astype(np.float32).tolist()
+
+
+def export_camera_jsons(config: dict, offset: int) -> None:
     output_dir = Path(config.get("preprocess", {}).get("output_dir", "output/preprocess_results"))
     input_dir = Path(config.get("preprocess", {}).get("input_dir", "input"))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,6 +119,10 @@ def export_camera_jsons(config: dict, offset_paper: int) -> None:
     video_by_id = {
         "cam1": Path(paths.get("camera1_video", "input/video_1.mp4")),
         "cam2": Path(paths.get("camera2_video", "input/video_2.mp4")),
+    }
+    pkl_by_id = {
+        "cam1": Path(paths.get("cam1_pkl", "")),
+        "cam2": Path(paths.get("cam2_pkl", "")),
     }
 
     calib_files = list(input_dir.glob("camera_*.calibration"))
@@ -102,6 +141,7 @@ def export_camera_jsons(config: dict, offset_paper: int) -> None:
 
     for cam_id in ["cam1", "cam2"]:
         video_path = video_by_id.get(cam_id)
+        pkl_path = pkl_by_id.get(cam_id)
         if video_path is None or not video_path.exists():
             print(f"[Preprocess] Video not found for {cam_id}: {video_path}")
             continue
@@ -149,13 +189,27 @@ def export_camera_jsons(config: dict, offset_paper: int) -> None:
                     extrinsic_cam = extr[:3, :3].tolist()
                     tvec = [float(extr[0, 3]), float(extr[1, 3]), float(extr[2, 3])]
 
+        wham_payload = None
+        if pkl_path is not None and pkl_path.exists():
+            try:
+                wham_payload = _load_wham_camera_payload(pkl_path)
+            except Exception as exc:
+                print(f"[Preprocess] PKL skip for {cam_id}: {exc}")
+
         payload = {
             "camera_id": cam_id,
             "source_pkl": source_by_id.get(cam_id, ""),
-            "offset_paper": int(offset_paper),
+            "offset": int(offset),
             "intrinsics_source": intrinsics_source,
             "intrinsics_estimation": K_esti.tolist(),
         }
+
+        if wham_payload is not None:
+            if "trans_cam" in wham_payload:
+                payload["trans_cam"] = np.asarray(wham_payload["trans_cam"]).tolist()
+            if "betas" in wham_payload:
+                mean_betas = _mean_shape_over_frames(wham_payload["betas"])
+                payload["betas"] = mean_betas
 
         if intrinsics_cam is not None:
             payload["intrinsics_cam"] = intrinsics_cam
@@ -183,15 +237,16 @@ def load_camera_profile(config: dict, cam_id: str) -> dict:
     return data
 
 def resolve_selected_offset_from_camera_profile(config: dict) -> tuple[int, str, Path]:
-    method = str(config.get("preprocess", {}).get("offset_method", "paper")).strip().lower()
-    if method not in {"paper"}:
-        raise ValueError(f"Invalid preprocess.offset_method={method!r}, expected 'paper'")
+    method = str(config.get("preprocess", {}).get("offset_method", "offset")).strip().lower()
+    if method not in {"offset"}:
+        raise ValueError(f"Invalid preprocess.offset_method={method!r}, expected 'offset'")
 
     cam_profile = load_camera_profile(config, "cam1")
-    key = f"offset_{method}"
-    if key not in cam_profile:
-        raise KeyError(f"Missing {key!r} in camera profile data_cam1.json")
-    return int(cam_profile[key]), method, Path("data_cam1.json")
+    if "offset" in cam_profile:
+        return int(cam_profile["offset"]), method, Path("data_cam1.json")
+    if "offset_paper" in cam_profile:
+        return int(cam_profile["offset_paper"]), method, Path("data_cam1.json")
+    raise KeyError("Missing 'offset' in camera profile data_cam1.json")
 
 def resolve_selected_intrinsics(config: dict, cam_id: str) -> list[list[float]]:
     profile = load_camera_profile(config, cam_id)

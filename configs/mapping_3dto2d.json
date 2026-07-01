@@ -1,0 +1,23 @@
+{
+  "head": "head",
+  "neck": "neck",
+  "right_shoulder": "right_shoulder",
+  "right_elbow": "right_elbow",
+  "right_wrist": "right_wrist",
+  "left_shoulder": "left_shoulder",
+  "left_elbow": "left_elbow",
+  "left_wrist": "left_wrist",
+  "pelvis": "pelvis",
+  "right_hip": "right_hip",
+  "right_knee": "right_knee",
+  "right_ankle": "right_ankle",
+  "left_hip": "left_hip",
+  "left_knee": "left_knee",
+  "left_ankle": "left_ankle",
+  "left_toe": "left_toe",
+  "left_foot": "left_foot",
+  "right_toe": "right_toe",
+  "right_foot": "right_foot",
+  "left_hand": "left_hand",
+  "right_hand": "right_hand"
+}

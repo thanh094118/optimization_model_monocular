@@ -1,0 +1,82 @@
+\documentclass[../DoAn.tex]{subfiles}
+\begin{document}
+
+Trong những năm gần đây, bài toán tái tạo chuyển động cơ thể người từ dữ liệu hình ảnh đã trở thành một hướng nghiên cứu quan trọng trong lĩnh vực thị giác máy tính và phân tích chuyển động. Các phương pháp ước tính pose 3D từ video RGB cho phép giảm đáng kể yêu cầu về phần cứng so với các hệ thống Motion Capture truyền thống, từ đó mở rộng khả năng ứng dụng trong các môi trường thực tế. Tuy nhiên, việc duy trì độ chính xác và tính ổn định của chuyển động tái tạo vẫn là một thách thức lớn, đặc biệt đối với các hệ thống sử dụng dữ liệu monocular.
+
+Xuất phát từ các vấn đề trên, chương này trình bày bối cảnh của bài toán tái tạo chuyển động người 3D, phân tích các hạn chế của các phương pháp hiện tại và giới thiệu định hướng nghiên cứu của đồ án đối với bài toán refinement pose hậu xử lý.
+
+\section{Đặt vấn đề}
+\label{sec:dvd}
+
+Bài toán chụp chuyển động cơ thể người (MoCap) đóng vai trò quan trọng trong nhiều lĩnh vực như hoạt hình, trò chơi điện tử, phân tích thể thao và tương tác người với máy. Trong các hệ thống này, dữ liệu chuyển động 3D được sử dụng để mô tả tư thế và quỹ đạo chuyển động của cơ thể người trong không gian, phục vụ cho các tác vụ mô phỏng, phân tích kỹ thuật và trực quan hóa chuyển động.
+
+Các hệ thống MoCap truyền thống thường sử dụng hệ thống đa camera hồng ngoại hoặc cảm biến quán tính gắn trên cơ thể người dùng nhằm thu thập dữ liệu chuyển động với độ chính xác cao. Tuy nhiên, các hệ thống này yêu cầu chi phí triển khai lớn, môi trường ghi hình được kiểm soát chặt chẽ và quy trình hiệu chỉnh phức tạp. Điều này làm hạn chế khả năng triển khai trong các bài toán thực tế hoặc các môi trường ngoài phòng thí nghiệm.
+
+Sự phát triển của học sâu và thị giác máy tính đã mở ra hướng tiếp cận mới cho bài toán tái tạo chuyển động người thông qua video RGB thông thường. Trong bài toán monocular 3D pose estimation, mô hình cần suy diễn cấu trúc không gian ba chiều của cơ thể người chỉ từ dữ liệu ảnh 2D. Hướng tiếp cận này giúp giảm yêu cầu phần cứng và tăng tính linh hoạt trong quá trình thu thập dữ liệu.
+
+Mặc dù đạt được nhiều kết quả tích cực, bài toán monocular 3D pose estimation vẫn tồn tại nhiều khó khăn. Do thông tin chiều sâu không ước tính được trực tiếp trong ảnh đầu vào, nhiều cấu hình pose 3D khác nhau có thể tạo ra cùng một phép chiếu 2D lên mặt phẳng ảnh. Tính bất định này khiến mô hình dễ gặp sai số về chiều sâu, đặc biệt đối với các khớp bị che khuất hoặc các chuyển động phức tạp.
+
+Bên cạnh đó, pose 3D được suy diễn từ video monocular thường xuất hiện hiện tượng rung giật giữa các khung hình liên tiếp, sai lệch cấu trúc xương hoặc các chuyển động không hợp lý về mặt giải phẫu. Trong các bài toán phân tích chuyển động, các sai số này không chỉ ảnh hưởng đến chất lượng trực quan mà còn làm giảm độ tin cậy của dữ liệu tái tạo.
+
+Từ những vấn đề trên, việc nghiên cứu các phương pháp phát hiện và hiệu chỉnh pose lỗi đóng vai trò quan trọng trong quá trình xây dựng các hệ thống human motion analysis có khả năng hoạt động trong môi trường thực tế. Đồ án lựa chọn hướng tiếp cận refinement hậu xử lý nhằm cải thiện tính ổn định và tính hợp lý của chuyển động người 3D dựa trên pose được suy diễn từ các mô hình học sâu có sẵn.
+
+\section{Các giải pháp hiện tại và hạn chế}
+\label{sec:giaiphap}
+
+Các nghiên cứu hiện nay về ước tính tư thế người 3D chủ yếu tập trung vào hai hướng tiếp cận chính gồm các phương pháp suy diễn trực tiếp từ ảnh RGB và các phương pháp tối ưu hóa dựa trên mô hình cơ thể tham số (SMPL)
+
+Nhóm phương pháp suy diễn trực tiếp sử dụng mạng học sâu để ánh xạ đặc trưng hình ảnh sang pose 3D hoặc tham số cơ thể. Các mô hình như PARE, CLIFF hoặc WHAM thường khai thác mạng CNN hoặc Transformer nhằm trích xuất đặc trưng không gian và dự đoán trực tiếp các tham số của mô hình SMPL. Một số nghiên cứu gần đây còn tích hợp thêm thông tin thời gian từ chuỗi video để giảm nhiễu và cải thiện độ ổn định chuyển động.
+
+Bên cạnh đó, các phương pháp tối ưu hóa dựa trên mô hình cơ thể tham số như SMPLify hoặc PyMAF sử dụng reprojection loss để tinh chỉnh pose và shape sao cho phù hợp với dữ liệu ảnh đầu vào. Hướng tiếp cận này cho phép tăng tính nhất quán hình học giữa pose 3D và ảnh quan sát, đồng thời hỗ trợ biểu diễn chuyển động dưới dạng mesh có cấu trúc giải phẫu rõ ràng.
+
+Mặc dù đạt được nhiều tiến bộ, các phương pháp hiện tại vẫn tồn tại nhiều hạn chế khi áp dụng trong môi trường thực tế. Đối với các hệ thống monocular, việc thiếu thông tin chiều sâu khiến mô hình khó xác định chính xác vị trí không gian của các khớp bị che khuất hoặc các chi chuyển động nhanh. Điều này dẫn đến các hiện tượng sai lệch pose như đảo hướng chi, thay đổi bất thường chiều dài xương hoặc dịch chuyển không liên tục giữa các frame.
+
+Các phương pháp khai thác thông tin thời gian có thể cải thiện độ mượt của chuyển động nhưng vẫn gặp hiện tượng tích lũy sai số theo thời gian. Trong khi đó, các phương pháp fitting-based thường có chi phí tối ưu hóa lớn và phụ thuộc nhiều vào chất lượng pose khởi tạo. Ngoài ra, các hệ thống được triển khai hiện nay thường tối ưu hóa theo sai số tọa độ khớp mà chưa khai thác đầy đủ các ràng buộc liên quan đến cấu trúc giải phẫu và tính hợp lý vật lý của chuyển động.
+
+Một hạn chế khác là nhiều hệ thống yêu cầu cấu hình đa camera đã được hiệu chỉnh chính xác nhằm cải thiện chất lượng pose 3D. Điều này làm giảm tính linh hoạt khi triển khai trong các môi trường khó kiểm soát. Trong thực tế, việc tận dụng thêm thông tin từ góc nhìn thứ hai mà không phụ thuộc hoàn toàn vào quy trình hiệu chỉnh camera nghiêm ngặt vẫn là một vấn đề còn nhiều thách thức.
+
+\section{Mục tiêu và định hướng giải pháp}
+
+Mục tiêu chính của đồ án là xây dựng một quy trình refinement hậu xử lý nhằm cải thiện chất lượng chuyển động người 3D được tái tạo từ video RGB thông thường. Hệ thống hướng tới việc giảm các sai lệch pose phát sinh trong quá trình monocular estimation, đồng thời nâng cao tính ổn định theo thời gian và tính hợp lý của chuyển động tái tạo.
+
+Thay vì xây dựng một mô hình pose estimation mới, đồ án tập trung vào bài toán phát hiện và hiệu chỉnh pose lỗi dựa trên các tính chất nhất quán của chuyển động. Đầu vào của hệ thống là pose 3D hoặc tham số cơ thể được suy diễn từ các mô hình học sâu có sẵn. Trên cơ sở đó, hệ thống refinement thực hiện đánh giá và tối ưu lại chuyển động nhằm giảm hiện tượng rung giật, sai lệch chiều sâu và các tư thế không phù hợp với cấu trúc giải phẫu.
+
+Định hướng giải pháp của đồ án bao gồm ba thành phần chính. Thành phần thứ nhất khai thác tính nhất quán theo thời gian nhằm phát hiện các biến đổi bất thường giữa các khung hình liên tiếp và cải thiện độ mượt của quỹ đạo chuyển động. Thành phần thứ hai sử dụng bổ sung dữ liệu từ góc nhìn thứ hai để hỗ trợ hiệu chỉnh các sai lệch hình học phát sinh trong bài toán monocular pose estimation. Thành phần cuối cùng áp dụng các ràng buộc động học và cơ sinh học nhằm hạn chế các chuyển động vượt quá khả năng giải phẫu tự nhiên của cơ thể người.
+
+Trên cơ sở kết hợp các thành phần trên, đồ án hướng tới xây dựng một pipeline refinement có khả năng hoạt động với cấu hình phần cứng tối giản nhưng vẫn duy trì được độ ổn định và tính hợp lý của chuyển động trong các kịch bản thực tế.
+
+\section{Đóng góp của đồ án}
+
+Đồ án này có các đóng góp chính như sau:
+
+\begin{itemize}
+    \item Đề xuất một quy trình refinement hậu xử lý cho bài toán tái tạo chuyển động người 3D từ video dựa trên pose được suy diễn từ các mô hình học sâu có sẵn.
+
+    \item Xây dựng cơ chế phát hiện và hiệu chỉnh pose lỗi thông qua việc kết hợp tính nhất quán theo thời gian, tính nhất quán đa góc nhìn và ràng buộc cơ sinh học.
+
+    \item Đề xuất phương pháp khai thác bổ sung dữ liệu từ góc nhìn thứ hai nhằm hỗ trợ cải thiện chất lượng pose 3D trong các môi trường khó kiểm soát.
+
+    \item Thực hiện đánh giá hệ thống trên các bộ dữ liệu chuẩn và dữ liệu thực tế nhằm phân tích ảnh hưởng của từng thành phần refinement đối với chất lượng chuyển động tái tạo.
+\end{itemize}
+
+\section{Bố cục đồ án}
+
+Phần còn lại của báo cáo được tổ chức như sau.
+
+Chương 2 trình bày cơ sở lý thuyết liên quan đến bài toán human motion capture và ước tính tư thế người 3D. Nội dung chương tập trung mô tả các mô hình cơ thể tham số, biểu diễn pose 3D, các kỹ thuật tối ưu hóa pose và các phương pháp filtering thường được sử dụng trong quá trình xử lý chuyển động.
+
+Chương 3 trình bày phương pháp đề xuất của đồ án. Chương này mô tả kiến trúc tổng thể của pipeline refinement và các thành phần được sử dụng trong quá trình hiệu chỉnh pose.
+
+Chương 4 phân tích cơ sở lý thuyết của các thành phần trong hệ thống đề xuất. Nội dung chương tập trung phân tích các hàm loss, các ràng buộc động học và nguyên lý hoạt động của các bước tối ưu hóa được áp dụng trong quá trình refinement chuyển động.
+
+Chương 5 trình bày quá trình thực nghiệm và đánh giá hệ thống. Chương này mô tả dữ liệu sử dụng, thiết lập thí nghiệm, các chỉ số đánh giá và kết quả phân tích ảnh hưởng của từng thành phần refinement đối với chất lượng pose reconstruction.
+
+Cuối cùng, Chương 6 tổng kết các kết quả đạt được của đồ án, đồng thời trình bày các hạn chế còn tồn tại và định hướng phát triển trong tương lai đối với bài toán tái tạo chuyển động người 3D.
+
+\section*{Kết chương}
+
+Chương này đã trình bày tổng quan về bài toán tái tạo chuyển động người 3D từ video RGB và các khó khăn của monocular pose estimation trong môi trường thực tế. Các hạn chế của các phương pháp hiện tại đã được phân tích nhằm làm rõ nhu cầu của bài toán refinement pose hậu xử lý.
+
+Trên cơ sở đó, đồ án định hướng xây dựng một quy trình hiệu chỉnh pose kết hợp thông tin theo thời gian, dữ liệu đa góc nhìn và các ràng buộc cơ sinh học nhằm cải thiện chất lượng chuyển động tái tạo. Các cơ sở lý thuyết liên quan đến bài toán pose estimation, mô hình cơ thể tham số và các kỹ thuật tối ưu hóa sẽ được trình bày trong chương tiếp theo.
+
+\end{document}

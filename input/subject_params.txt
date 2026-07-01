@@ -1,3 +1,0 @@
-height_m = 1.65
-mass_kg  = 55.0
-sex      = female

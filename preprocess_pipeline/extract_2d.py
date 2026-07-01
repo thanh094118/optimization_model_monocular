@@ -2,30 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Optional
 
 import joblib
 import numpy as np
+import yaml
 
-from json_io import read_json, write_json
-
-TRACKING_RESULTS_MAP = {
-    "neck": 0,
-    "right_shoulder": 6,
-    "right_elbow": 8,
-    "right_hand": 10,
-    "left_shoulder": 5,
-    "left_elbow": 7,
-    "left_hand": 9,
-    "right_hip": 12,
-    "right_knee": 14,
-    "right_ankle": 16,
-    "left_hip": 11,
-    "left_knee": 13,
-    "left_ankle": 15,
-    "right_foot": 21,
-    "left_foot": 18,
-}
-
+from keypoints_map import load_keypoints2d_map
+import json_io
 
 def _to_numpy(value):
     if hasattr(value, "detach"):
@@ -49,7 +33,7 @@ def _extract_person_payload(wham_data):
     return None
 
 
-def _load_tracking_payload(pkl_path: Path) -> dict | None:
+def _load_tracking_payload(pkl_path: Path) -> Optional[dict]:
     if not pkl_path.exists():
         print(f"[Preprocess] 2D skip: PKL not found: {pkl_path}")
         return None
@@ -66,7 +50,20 @@ def _load_tracking_payload(pkl_path: Path) -> dict | None:
     return dict(tracking)
 
 
-def _build_2d_camera_payload(tracking: dict) -> tuple[dict, list | None]:
+def _load_keypoints2d_map(map_path: Path) -> dict[str, object]:
+    return load_keypoints2d_map(str(map_path))
+
+
+def _resolve_keypoint_spec(spec, source_keypoints: np.ndarray) -> list[float]:
+    if isinstance(spec, int):
+        return source_keypoints[spec, :3].tolist()
+    if isinstance(spec, Mapping) and "average" in spec:
+        pts = [source_keypoints[int(idx), :3] for idx in spec["average"]]
+        return np.mean(pts, axis=0).tolist()
+    raise ValueError(f"Unsupported spec: {spec}")
+
+
+def _build_2d_camera_payload(tracking: dict, keypoints2d_map: dict[str, object]) -> tuple[dict, Optional[list]]:
     if "keypoints" not in tracking or "frame_id" not in tracking:
         missing = [k for k in ("frame_id", "keypoints") if k not in tracking]
         raise KeyError(f"Missing tracking key(s): {missing}")
@@ -78,25 +75,23 @@ def _build_2d_camera_payload(tracking: dict) -> tuple[dict, list | None]:
     if keypoints.shape[0] != frame_ids.shape[0]:
         raise ValueError(f"frame_id/keypoints frame mismatch: {frame_ids.shape[0]} vs {keypoints.shape[0]}")
 
-    max_index = max(TRACKING_RESULTS_MAP.values())
-    if keypoints.shape[1] <= max_index:
-        raise ValueError(f"keypoints has {keypoints.shape[1]} joints, need index {max_index}")
-
     by_frame = {}
     for row_idx, frame_id in enumerate(frame_ids):
-        by_frame[str(int(frame_id))] = {
-            joint_name: keypoints[row_idx, src_idx, :3].tolist()
-            for joint_name, src_idx in TRACKING_RESULTS_MAP.items()
-        }
+        source_keypoints = keypoints[row_idx]
+        resolved_keypoints: dict[str, list[float]] = {}
+        for joint_name, spec in keypoints2d_map.items():
+            resolved_keypoints[joint_name] = _resolve_keypoint_spec(spec, source_keypoints)
+            
+        if len(resolved_keypoints) != 21:
+            raise ValueError(f"Expected 21 keys, got {len(resolved_keypoints)}")
+            
+        by_frame[str(int(frame_id))] = resolved_keypoints
 
-    init_betas = tracking.get("init_betas")
-    shape = _to_numpy(init_betas).astype(float).tolist() if init_betas is not None else None
     payload = {
-        "tracking_results_map": dict(TRACKING_RESULTS_MAP),
         "frame_ids": frame_ids.tolist(),
         "keypoints": by_frame,
     }
-    return payload, shape
+    return payload, None
 
 
 def export_tracking_2d_to_camera_profiles(config: dict) -> None:
@@ -106,6 +101,7 @@ def export_tracking_2d_to_camera_profiles(config: dict) -> None:
         "cam1": Path(paths.get("cam1_pkl", "")),
         "cam2": Path(paths.get("cam2_pkl", "")),
     }
+    keypoints2d_map = _load_keypoints2d_map(Path(paths["keypoints2d_map"]))
 
     for cam_id, pkl_path in pkl_by_cam.items():
         profile_path = output_dir / f"data_{cam_id}.json"
@@ -118,15 +114,12 @@ def export_tracking_2d_to_camera_profiles(config: dict) -> None:
             continue
 
         try:
-            keypoints_2d, shape = _build_2d_camera_payload(tracking)
+            keypoints_2d, _ = _build_2d_camera_payload(tracking, keypoints2d_map)
         except Exception as exc:
             print(f"[Preprocess] 2D skip: {pkl_path.name}: {exc}")
             continue
 
-        profile = read_json(profile_path)
+        profile = json_io.read_json(profile_path)
         profile[f"2D_camera_{cam_id}"] = keypoints_2d
-        if shape is not None:
-            profile["shape"] = shape
-            profile["init_betas"] = shape
-        write_json(profile_path, profile)
-        print(f"[Preprocess] Exported 2D keypoints and shape to {profile_path.name}")
+        json_io.write_json(profile_path, profile)
+        print(f"[Preprocess] Exported 2D keypoints to {profile_path.name}")

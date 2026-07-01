@@ -1,0 +1,24 @@
+\documentclass[../DoAn.tex]{subfiles}
+\begin{document}
+
+\begin{center}
+    \Large{\textbf{TÓM TẮT NỘI DUNG ĐỒ ÁN}}\\
+\end{center}
+\vspace{1cm}
+
+Chụp chuyển động cơ thể người (Motion Capture – MoCap) giữ vai trò quan trọng trong nhiều lĩnh vực như hoạt hình, trò chơi điện tử, thể thao và phân tích hành vi. Tuy nhiên, việc duy trì độ chính xác cao trong môi trường thực tế vẫn là thách thức lớn đối với các hệ thống thị giác máy tính do điều kiện góc quay và bối cảnh thường khó kiểm soát được như trong phòng thí nghiệm. Các hệ thống MoCap truyền thống chủ yếu dựa trên hệ thống đa camera chuyên dụng hoặc cảm biến đeo trên người (IMU), dẫn đến chi phí triển khai cao và tính linh hoạt thấp. Sự phát triển của deep learning đã cho phép ước tính tư thế người 3D từ video monocular RGB, giúp giảm đáng kể yêu cầu phần cứng và chi phí vận hành. Tuy nhiên, các phương pháp monocular vẫn tồn tại nhiều hạn chế như ambiguity về chiều sâu, sai lệch chuyển động theo thời gian và thiếu tính nhất quán vật lý.
+
+Đồ án lựa chọn hướng tiếp cận kết hợp giữa monocular pose estimation, multi-view geometry và các ràng buộc cơ sinh học nhằm tận dụng ưu điểm linh hoạt, chi phí thấp của monocular đồng thời cải thiện độ chính xác nhờ thông tin từ góc nhìn thứ hai. Các biomechanical constraints cũng được tích hợp để tăng physical consistency và giảm các chuyển động không hợp lý.
+
+Giải pháp được xây dựng theo nhiều giai đoạn tối ưu. Hệ thống trước hết sử dụng mô hình monocular để ước tính tư thế 3D ban đầu, sau đó khai thác dữ liệu từ góc nhìn thứ hai để hiệu chỉnh sai lệch phát sinh từ bài toán đơn góc nhìn. Tiếp theo, các bước tối ưu hóa dựa trên temporal smoothing và biomechanical constraints được áp dụng nhằm cải thiện độ ổn định và tính chính xác của chuyển động tái tạo. Kết quả cuối cùng được đánh giá thông qua dữ liệu mẫu và trực quan hóa chuyển động.
+
+Đóng góp chính của đồ án là xây dựng thành công một quy trình khép kín cho bài toán ước tính chuyển động người với yêu cầu phần cứng tối thiểu, đồng thời cho phép kết hợp đa góc nhìn mà không cần hiệu chỉnh camera phức tạp. Hệ thống không chỉ cải thiện độ chính xác của pose reconstruction mà còn tăng tính ổn định và khả năng ứng dụng trong các bài toán human motion analysis.
+
+\begin{flushright}
+Sinh viên thực hiện\\
+\begin{tabular}{@{}c@{}}
+\textit{(Ký và ghi rõ họ tên)}
+\end{tabular}
+\end{flushright}
+
+\end{document}

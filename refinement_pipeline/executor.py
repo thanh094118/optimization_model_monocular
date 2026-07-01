@@ -12,7 +12,7 @@ import numpy as np
 import joblib
 from loguru import logger
 
-from refinement_pipeline.config import BODY25_JOINT_MAP
+from keypoints_map import load_keypoints3d_map
 from refinement_pipeline.logs import log_forced_run
 from refinement_pipeline.wham_loader import load_wham_output
 from refinement_pipeline.subject_loader import load_subject_params
@@ -23,9 +23,9 @@ def _export_refi_jsons_from_vertices(vertices_cam_np, output_dir, frame_ids, j_r
     output_dir.mkdir(parents=True, exist_ok=True)
 
     j_full = np.load(j_regressor_path)
-    if j_full.shape != (25, 6890):
+    if j_full.shape != (27, 6890):
         raise ValueError(
-            "J_regressor_body25 must have shape (25, 6890), got {}".format(j_full.shape)
+            "J_regressor must have shape (27, 6890), got {}".format(j_full.shape)
         )
 
     j_regressor = torch.tensor(j_full, dtype=torch.float32)
@@ -40,11 +40,13 @@ def _export_refi_jsons_from_vertices(vertices_cam_np, output_dir, frame_ids, j_r
     if frame_ids_np.shape[0] != kp3d.shape[0]:
         frame_ids_np = np.arange(kp3d.shape[0], dtype=np.int64)
 
+    map_data = load_keypoints3d_map(config["paths"]["keypoints3d_map"])
+
     for i, frame_id in enumerate(frame_ids_np):
         frame_joints = {}
-        for name, idx in BODY25_JOINT_MAP.items():
-            coord = kp3d[i, idx].tolist()
-            frame_joints[name] = [round(float(c), 5) for c in coord]
+        for kp in map_data["keypoints"]:
+            coord = kp3d[i, kp["regressor_index"]].tolist()
+            frame_joints[kp["name"]] = [round(float(c), 5) for c in coord]
 
         out_file = output_dir / "refi_data_{}.json".format(i + 1)
         with open(out_file, "w", encoding="utf-8") as f:
@@ -105,17 +107,16 @@ def run_refinement_optimization(config):
         height_m=subject["height_m"],
         mass_kg=subject["mass_kg"],
         sex=subject["sex"],
-        activity=cfg.get("activity"),
-        rotation=cfg.get("rotation"),
-        use_gpu=cfg.get("use_gpu", True),
+        activity=None,
+        rotation=0,
+        use_gpu=True,
         static_cam=cfg.get("static_cam", True),
         n_iter_opt2=cfg.get("n_iter_opt2", 75),
         filter_freq=cfg.get("filter_freq", 6),
         smoothness_diff_n=cfg.get("smoothness_diff_n", 1),
         print_loss_terms=cfg.get("print_loss_terms", False),
-        plotting=cfg.get("plotting", False),
         save_smpl_for_viz=cfg.get("save_smpl_for_viz", True),
-        j_regressor_body25_pth=paths_cfg.get("j_regressor_body25", "models/J_regressor_body25.npy"),
+        j_regressor_3d_pth=paths_cfg.get("j_regressor_3d", "models/J_regressor_body25_plus_palm27.npy"),
     )
 
 
@@ -138,9 +139,8 @@ def run_optimization_only(
     filter_freq=6,
     smoothness_diff_n=1,
     print_loss_terms=False,
-    plotting=False,
     save_smpl_for_viz=True,
-    j_regressor_body25_pth="models/J_regressor_body25.npy",
+    j_regressor_3d_pth="models/J_regressor_body25_plus_palm27.npy",
     weights_opt2=None,
 ):
     ut = external["ut"]
@@ -162,8 +162,6 @@ def run_optimization_only(
         "keypoints_3d_cam_pkl": None,
         "vertices_3d_cam_pkl": None,
         "refi_jsons": None,
-        "plot_objective": None,
-        "plot_2d": None,
         "predicted_activity": None,
         "activity_detection_method": None,
     }
@@ -599,12 +597,11 @@ def run_optimization_only(
                 output_paths["vertices_3d_cam_pkl"] = verts_path
 
                 refi_jsons_dir = os.path.join(output_path, "refi_jsons")
-                j_regressor_path = j_regressor_body25_pth
                 output_paths["refi_jsons"] = _export_refi_jsons_from_vertices(
                     vertices_cam.cpu().numpy(),
                     refi_jsons_dir,
                     frame_ids_arr,
-                    j_regressor_path,
+                    j_regressor_3d_pth,
                 )
 
             n_out = len(t_root_in_world)
@@ -661,45 +658,6 @@ def run_optimization_only(
         except Exception as e:
             logger.error("Error saving viz outputs: {}".format(e))
             logger.error(traceback.format_exc())
-
-    if plotting:
-        try:
-            from utils.utils_vis import (
-                plot_objective_function,
-                plot_2d_keypoints_interactive_plotly,
-            )
-
-            plot_obj_path = plot_objective_function(
-                output_opt2,
-                show=False,
-                save_path=output_path,
-            )
-
-            output_paths["plot_objective"] = plot_obj_path
-
-            key2d_smpl_opt2 = ut.reproject(
-                intrinsics,
-                r_world_to_cam,
-                t_world_to_cam,
-                output_opt2["key_3d"].squeeze(),
-            )
-
-            key2d_plot = {
-                "image": key2d.cpu().numpy(),
-                "opt1": key2d_smpl_opt1.cpu().squeeze(0).numpy(),
-                "opt2": key2d_smpl_opt2.detach().cpu().squeeze(0).numpy(),
-            }
-
-            fig_2d_path = plot_2d_keypoints_interactive_plotly(
-                key2d_plot,
-                save_path=output_path,
-                range_mono=opencap_mono_frame_range_video_ref,
-            )
-
-            output_paths["plot_2d"] = fig_2d_path
-
-        except Exception as e:
-            logger.warning("Plotting failed: {}".format(e))
 
     if device == "cuda":
         torch.set_default_tensor_type("torch.FloatTensor")

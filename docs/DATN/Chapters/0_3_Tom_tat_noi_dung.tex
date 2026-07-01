@@ -1,0 +1,29 @@
+\documentclass[../DoAn.tex]{subfiles}
+\begin{document}
+
+\begin{center}
+    \Large{\textbf{TÓM TẮT NỘI DUNG ĐỒ ÁN}}\\
+\end{center}
+\vspace{1cm}
+
+%Chụp chuyển động cơ thể người (Motion Capture – MoCap) là bài toán thu nhận và biểu diễn chuyển động của cơ thể người trong không gian ba chiều, có vai trò quan trọng trong hoạt hình, trò chơi điện tử, phân tích thể thao, phục hồi chức năng và tương tác người – máy. Các hệ thống MoCap truyền thống thường sử dụng nhiều camera chuyên dụng, marker hoặc cảm biến quán tính để đạt độ chính xác cao, nhưng yêu cầu chi phí lớn, môi trường ghi hình được kiểm soát và quy trình hiệu chỉnh phức tạp. Gần đây, các phương pháp ước lượng tư thế người 3D từ video RGB monocular đã giúp giảm yêu cầu phần cứng và tăng tính linh hoạt. Tuy nhiên, do chỉ quan sát từ một góc nhìn, các phương pháp này vẫn dễ gặp lỗi khi có che khuất, nhầm lẫn chiều sâu, chuyển động nhanh hoặc tư thế phức tạp, làm giảm độ ổn định và độ tin cậy của dữ liệu chuyển động tái tạo.
+% Đồ án lựa chọn hướng tiếp cận hậu xử lý kết quả ước lượng tư thế người 3D thay vì xây dựng một mô hình pose estimation mới. Hướng này phù hợp vì có thể tận dụng kết quả từ các mô hình monocular hiện có, đồng thời bổ sung cơ chế kiểm tra và hiệu chỉnh lỗi dựa trên thông tin từ góc nhìn thứ hai. Cụ thể, hệ thống sử dụng hai chuỗi pose 3D được ước lượng độc lập từ hai monocular camera, sau đó phát hiện các sai lệch giữa hai góc nhìn, phân tích tính ổn định theo thời gian và áp dụng các ràng buộc động học cơ thể để hiệu chỉnh pose.
+
+% Đóng góp chính của đồ án là xây 
+% dựng một quy trình phát hiện và hiệu chỉnh lỗi ước lượng tư thế người 3D dựa trên nhất quán đa góc nhìn. Kết quả cuối cùng là một pipeline hậu xử lý có khả năng cải thiện chất lượng chuỗi pose 3D trong điều kiện phần cứng tối giản, hướng tới các kịch bản triển khai thực tế.
+
+Video RGB đơn góc nhìn (RGB monocular video) là một trong các nguồn dữ liệu chi phí thấp để tái tạo chuyển động cơ thể người. Tuy nhiên, do chỉ quan sát từ một hướng, việc ước lượng tư thế người trong không gian ba chiều (3D pose estimation) dễ bị sai lệch khi có che khuất, nhập nhằng chiều sâu, chuyển động nhanh hoặc tư thế phức tạp.
+Đồ án kế thừa một quy trình đã có cho việc phát hiện và hiệu chỉnh sai lệch trong ước lượng tư thế người trong không gian ba chiều dựa trên tính nhất quán giữa hai góc nhìn. Trên cơ sở đó, đồ án mô hình hóa các tiêu chí phát hiện lỗi dựa trên tính nhất quán giữa hai góc nhìn, độ ổn định theo thời gian và ràng buộc động học cơ thể; xây dựng cơ chế phân tích tự động các sai lệch; từ đó lựa chọn và hiệu chỉnh các tham số phù hợp cho quá trình phát hiện và hiệu chỉnh lỗi.
+Từ đó, đồ án hiện thực hóa quy trình này thành một công cụ cải thiện chất lượng chuỗi chuyển động tái tạo trong điều kiện phần cứng tối giản, phù hợp với các kịch bản triển khai thực tế.
+Công cụ nhận đầu vào là các video RGB được quay tại hiện trường. Đồ án đã triển khai một tools hoàn chỉnh cho phép xử lý 2 video RGB trên và trả về tập các chuỗi tư thế được ước lượng độc lập từ các video đó. Các chức năng chính tiếp theo bao gồm đồng bộ dữ liệu đầu vào, chuẩn hóa chuỗi tư thế, đối chiếu sai lệch giữa hai góc nhìn, phân tích độ ổn định theo thời gian và áp dụng các ràng buộc động học cơ thể để phát hiện, hiệu chỉnh các khung hình hoặc khớp bất thường. Kết quả đầu ra là chuỗi tư thế sau hiệu chỉnh, kèm theo thông tin về các lỗi được phát hiện, vị trí lỗi trong chuỗi chuyển động và mức độ thay đổi so với dữ liệu đầu vào.  
+Hiệu quả của công cụ được kiểm chứng trên 2 tập dữ liệu benchmark, với mô hình WHAM được sử dụng để sinh tư thế đầu vào. Kết quả định lượng cho thấy công cụ cải thiện được chỉ số PA-MPJPE 14.29\% so với chuỗi tư thế ban đầu. 
+%iệu quả của công cụ được kiểm chứng trên 2 tập dữ liệu benchmark và kịch bản thử nghiệm thực tế, với mô hình zzz và kkk được sử dụng để sinh tư thế đầu vào. Kết quả định lượng cho thấy công cụ cải thiện được chỉ số A xxx\%, B ttt\% so với chuỗi tư thế ban đầu. 
+
+\begin{flushright}
+Sinh viên thực hiện\\
+\begin{tabular}{@{}c@{}}
+\textit{(Ký và ghi rõ họ tên)}
+\end{tabular}
+\end{flushright}
+
+\end{document}

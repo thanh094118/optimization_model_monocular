@@ -3,6 +3,7 @@ import re
 import copy
 import joblib
 from json_io import read_json, write_json
+from keypoints_map import load_keypoints3d_map
 from fusion_pipeline.config import OUTPUT_SUBDIRS
 from fusion_pipeline.correction import (
     apply_confidence_corrections,
@@ -140,6 +141,7 @@ def _confidence2d_for_frame(data: dict, frame_idx: int, profiles: dict) -> dict:
 
 def run_phase3_pipeline(
     data_in,
+    map_path,
     verts_by_cam=None,
     occlusion_tau=0.05,
     regularization=False,
@@ -156,9 +158,14 @@ def run_phase3_pipeline(
 ):
     cam1 = {k: as_xyz(v) for k, v in data_in["camera1"].items()}
     cam2 = {k: as_xyz(v) for k, v in data_in["camera2"].items()}
-    names = sorted(set(cam1.keys()) & set(cam2.keys()))
-    if not names:
-        raise ValueError("No common joints between camera1 and camera2")
+
+    map_data = load_keypoints3d_map(map_path)
+    expected_names = [kp["name"] for kp in map_data["keypoints"]]
+    
+    if set(cam1.keys()) != set(expected_names) or set(cam2.keys()) != set(expected_names):
+        raise ValueError("Input does not have exactly the 21 expected keys for both cameras")
+        
+    names = expected_names
     cam1 = {k: cam1[k] for k in names}
     cam2 = {k: cam2[k] for k in names}
 
@@ -328,6 +335,7 @@ def run_fusion(config: dict) -> None:
             confidence2d_by_cam = _confidence2d_for_frame(data, frame_idx, confidence2d_profiles)
             result = run_phase3_pipeline(
                 data,
+                map_path=paths["keypoints3d_map"],
                 verts_by_cam=verts_input,
                 occlusion_tau=occlusion_cfg.get("tau", 0.01),
                 regularization=opt_cfg.get("regularization", True),

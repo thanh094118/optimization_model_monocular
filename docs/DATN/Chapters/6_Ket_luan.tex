@@ -1,0 +1,20 @@
+\documentclass[../DoAn.tex]{subfiles}
+\begin{document}
+
+\section{Kết luận}
+
+Đồ án đã nghiên cứu bài toán hiệu chỉnh hậu xử lý cho kết quả tái tạo chuyển động người 3D từ mô hình monocular pose estimation. Thay vì huấn luyện một mô hình mới, đồ án sử dụng output thô từ WHAM làm đầu vào, bao gồm pose, shape, translation, vertices, keypoints 3D và keypoints 2D, sau đó thực hiện các bước xử lý nhằm cải thiện chất lượng chuyển động đầu ra.
+
+Phương pháp đề xuất được xây dựng dưới dạng pipeline gồm các giai đoạn chính: đồng bộ frame giữa hai camera, \textit{refinement\_pipeline}, \textit{pose\_pipeline}, \textit{fusion\_pipeline} và \textit{learnable\_pipeline}. Các bước này hướng tới việc giảm nhiễu theo thời gian, khai thác thông tin từ góc nhìn thứ hai và tinh chỉnh tham số SMPL để tạo ra pose 3D ổn định hơn.
+
+Đồ án cũng đã trình bày cơ sở lý thuyết cho các thành phần trong pipeline, bao gồm ràng buộc dữ liệu, ràng buộc theo thời gian, ràng buộc đa góc nhìn và ràng buộc động học/cơ sinh học. Hệ thống được đánh giá thông qua các chỉ số MPJPE, PA-MPJPE, PCK và trực quan hóa keypoints 3D hoặc keypoints chiếu lên video 2D.
+
+Tuy nhiên, phương pháp vẫn còn một số hạn chế. Chất lượng kết quả phụ thuộc nhiều vào output ban đầu của WHAM. Bên cạnh đó, quá trình fusion chịu ảnh hưởng bởi độ chính xác của bước đồng bộ frame và sự khác biệt giữa hai góc nhìn. Các ràng buộc cơ sinh học hiện tại mới dừng ở mức hình học và động học, chưa mô hình hóa đầy đủ các yếu tố vật lý như tiếp xúc mặt đất, trọng tâm hay lực tác động.
+
+\section{Hướng phát triển trong tương lai}
+
+Trong tương lai, hệ thống có thể được cải thiện theo một số hướng. Thứ nhất, cần nâng cao độ chính xác của bước đồng bộ và căn chỉnh giữa hai camera để giảm sai lệch khi fusion pose. Thứ hai, có thể bổ sung các kỹ thuật self-calibration hoặc ước lượng quan hệ hình học giữa hai view nhằm khai thác tốt hơn thông tin đa góc nhìn. Thứ ba, hệ thống có thể mở rộng các ràng buộc cơ sinh học và vật lý, chẳng hạn như ràng buộc tiếp xúc bàn chân với mặt đất, giới hạn vận tốc/gia tốc và kiểm soát độ ổn định của trọng tâm. Các ràng buộc này giúp giảm các lỗi thường gặp như foot sliding, xuyên sàn hoặc chuyển động thiếu tự nhiên.
+
+Cuối cùng, cần đánh giá hệ thống trên nhiều bộ dữ liệu và video thực tế hơn, đồng thời tối ưu hiệu năng tính toán để hướng tới khả năng xử lý gần thời gian thực trong các ứng dụng phân tích chuyển động, thể thao hoặc tương tác người -- máy.
+
+\end{document}

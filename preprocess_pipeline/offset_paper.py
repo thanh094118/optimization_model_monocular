@@ -1,14 +1,12 @@
 from collections import Counter
+from typing import Optional
 
 import joblib
 import numpy as np
 import smplx
 import torch
 from scipy.spatial.distance import cdist
-from keypoints_map import get_smpl_joint_map
-
-SMPL_JOINT_MAP = get_smpl_joint_map()
-JOINT_NAMES = tuple(SMPL_JOINT_MAP.keys())
+from keypoints_map import load_keypoints3d_map
 
 
 def _extract_person_payload(data):
@@ -37,7 +35,7 @@ def load_pkl_data(file_path):
     return person_data
 
 
-def get_canonical_joints_3d(model, person_data):
+def get_canonical_joints_3d(model, person_data, regressor_path, map_path):
     pose = np.asarray(person_data["pose"], dtype=np.float32)
     betas = np.asarray(person_data["betas"], dtype=np.float32)
     t = pose.shape[0]
@@ -54,10 +52,20 @@ def get_canonical_joints_3d(model, person_data):
             body_pose=pose_t[:, 3:],
             transl=transl,
         )
-    joints_all = output.joints.cpu().numpy()
-    result = np.empty((t, len(JOINT_NAMES), 3), dtype=np.float32)
-    for i, name in enumerate(JOINT_NAMES):
-        result[:, i, :] = joints_all[:, SMPL_JOINT_MAP[name], :]
+    
+    regressor = np.load(regressor_path)
+    if regressor.shape != (27, 6890):
+        raise ValueError(f"Expected regressor shape (27, 6890), got {regressor.shape}")
+        
+    map_data = load_keypoints3d_map(map_path)
+    row_indices = [kp["regressor_index"] for kp in map_data["keypoints"]]
+    if len(row_indices) != 21:
+        raise ValueError("Map does not contain 21 keys")
+        
+    reg_tensor = torch.as_tensor(regressor, dtype=torch.float32)
+    vertices = output.vertices # (t, 6890, 3)
+    joints_all = torch.einsum('jv, tvc -> tjc', reg_tensor, vertices)
+    result = joints_all[:, row_indices, :].cpu().numpy()
     return result
 
 
@@ -94,10 +102,30 @@ def dtw_mode_offset(seq1, seq2):
     return Counter(offsets).most_common(1)[0][0]
 
 
-def compute_offset_from_pkls(pkl1_path, pkl2_path, smpl_model_path, verbose=False):
+def compute_offset_from_pkls(
+    pkl1_path,
+    pkl2_path,
+    smpl_model_path,
+    j_regressor_path,
+    map_path,
+    verbose=False,
+    max_frames: Optional[int] = 100,
+):
     cam1_data = load_pkl_data(str(pkl1_path))
     cam2_data = load_pkl_data(str(pkl2_path))
     t = min(len(cam1_data["pose"]), len(cam2_data["pose"]))
+    if max_frames is not None:
+        t = min(t, int(max_frames))
+    cam1_data = {
+        **cam1_data,
+        "pose": cam1_data["pose"][:t],
+        "betas": cam1_data["betas"][:t] if np.asarray(cam1_data["betas"]).ndim > 1 else cam1_data["betas"],
+    }
+    cam2_data = {
+        **cam2_data,
+        "pose": cam2_data["pose"][:t],
+        "betas": cam2_data["betas"][:t] if np.asarray(cam2_data["betas"]).ndim > 1 else cam2_data["betas"],
+    }
     model = smplx.create(
         smpl_model_path,
         model_type="smpl",
@@ -106,6 +134,6 @@ def compute_offset_from_pkls(pkl1_path, pkl2_path, smpl_model_path, verbose=Fals
         flat_hand_mean=True,
         gender="neutral",
     ).eval()
-    seq1 = build_canonical_sequence(get_canonical_joints_3d(model, cam1_data))
-    seq2 = build_canonical_sequence(get_canonical_joints_3d(model, cam2_data))
+    seq1 = build_canonical_sequence(get_canonical_joints_3d(model, cam1_data, j_regressor_path, map_path))
+    seq2 = build_canonical_sequence(get_canonical_joints_3d(model, cam2_data, j_regressor_path, map_path))
     return int(dtw_mode_offset(seq1, seq2))

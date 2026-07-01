@@ -4,29 +4,36 @@ runtime:
   verbose: true
 
 preprocess:
-  input_dir: "input"
+  input_dir: "input/tt/S3/Seq1/imageSequence"
   output_dir: "output/preprocess_results"
+  start_frame: null
+  end_frame: null #null
 
 paths:
-  cam1_pkl: "input/wham_opencap_1.pkl"
-  cam2_pkl: "input/wham_opencap_2.pkl"
+  cam1_pkl: "input/tt/S3/Seq1/video_2/wham_opencap.pkl"
+  cam2_pkl: "input/tt/S3/Seq1/video_8/wham_opencap.pkl"
 
   smpl_model: "models/SMPL_NEUTRAL.pkl"
   segmentation: "models/smpl_partSegmentation_mapping.pkl"
-  j_regressor_body25: "models/J_regressor_body25.npy"
+  keypoints3d_map: "configs/keypoints3D_map.yml"
+  keypoints2d_map: "configs/keypoints2D_map.yml"
+  mapping_3dto2d: "configs/mapping_3dto2d.json"
+  j_regressor_3d: "models/J_regressor_body25_plus_palm27.npy"
 
   pose_output_dir: "output/pose_results"
   fused_output_dir: "output/fused_results"
   learnable_output_dir: "output/learnable_results"
+  optimized_output_dir: "output/optimized_results"
   visualization_output_dir: "output/visualize_results"
   evaluation_output_dir: "output/evaluation_results"
   refinement_output_dir: "output/refinement_results"
+  gmm_prior: "models/gmm_08.pkl"
 
   debug1_dir: "output/debug1"
   debug2_dir: "output/debug2"
 
-  camera1_video: "input/video_1.mp4"
-  camera2_video: "input/video_2.mp4"
+  camera1_video: "input/tt/S3/Seq1/imageSequence/video_2.avi"
+  camera2_video: "input/tt/S3/Seq1/imageSequence/video_8.avi"
 
 pose_export:
   enabled: true
@@ -59,10 +66,84 @@ fusion:
 learnable:
   enabled: true
   checkpoint: "models/best_ckpt.pth.tar"
-  lr: 0.03
-  iterations: 80
-  pose_prior_weight: 0.05
-  trans_prior_weight: 0.05
+  # lr: 0.03
+  # iterations: 80
+  # pose_prior_weight: 0.05
+  # trans_prior_weight: 0.05
+
+optimization:
+  enabled: true
+  device: auto
+  model:
+    model_type: smpl
+    gender: neutral
+    use_pca: false
+    flat_hand_mean: true
+  phase2:
+    joint_indices: [0, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14]
+    min_conf_sum: 6.5
+  phase3:
+    window_size: 2
+  phase5:
+    chunk_size: 256
+    chunk_stride: 256
+    optimizer: &lbfgs_optimizer
+      optim_type: lbfgs
+      lr: 1.0
+      max_iter: 8
+      max_outer_steps: 30
+      line_search_fn: null
+      tolerance_grad: 1.0e-7
+      tolerance_change: 1.0e-7
+      relative_tolerance: 1.0e-5
+    reprojection:
+      weight: 100.0
+      joint_indices:
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          19,
+          20,
+          22,
+          23,
+          25,
+          26,
+        ]
+    smooth:
+      weight: 1.0
+      window_weight: [0.5, 0.3, 0.1, 0.1]
+      linear_weight: 100.0
+      depth_weight: 1000.0
+      order: 2
+  phase6:
+    repeat: 1
+    optimizer: *lbfgs_optimizer
+    reprojection:
+      weight: 100.0
+      gm_rho: 0.02
+    smooth:
+      weight: 1.0
+      window_weight: [0.5, 0.3, 0.1, 0.1]
+      th_linear_weight: 100.0
+      th_depth_weight: 1000.0
+      rh_weight: 1.0
+      order: 2
+  cameras:
+    - camera1
+    - camera2
 
 visualization:
   enabled: true
@@ -84,7 +165,7 @@ refinement:
   subject_params: "input/subject_params.txt"
   parameters_yaml: "configs/parameters.yaml"
 
-  activity: "sts"
+  activity: null
   rotation: 0
 
   use_gpu: true
@@ -93,10 +174,9 @@ refinement:
   filter_freq: 6
   smoothness_diff_n: 1
   print_loss_terms: false
-  plotting: true
   save_smpl_for_viz: true
 
 evaluation:
   enabled: true
-  ground_truth_dir: "input/gtruth_results"
-  testcase_name: "testcase1"
+  ground_truth_dir: "input/tt/frames_json/s3_seq1"
+  testcase_name: null

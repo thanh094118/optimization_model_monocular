@@ -4,11 +4,14 @@ import yaml
 
 ALLOWED_STAGES = {
     "all",
+    "all_vis",
     "preprocess",
     "pose",
     "fusion",
     "learnable",
+    "optimization",
     "visualization",
+    "evaluation",
     "refinement",
 }
 
@@ -47,9 +50,14 @@ def validate_config(config):
         "cam1_pkl",
         "cam2_pkl",
         "smpl_model",
+        "keypoints3d_map",
+        "keypoints2d_map",
+        "mapping_3dto2d",
+        "j_regressor_3d",
         "pose_output_dir",
         "fused_output_dir",
         "learnable_output_dir",
+        "optimized_output_dir",
         "visualization_output_dir",
         "refinement_output_dir",
     ]

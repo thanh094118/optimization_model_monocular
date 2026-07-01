@@ -1,0 +1,146 @@
+\documentclass[../DoAn.tex]{subfiles}
+\begin{document}
+
+Trên cơ sở vấn đề nghiên cứu đã trình bày ở Chương 1, chương này phân tích ngữ cảnh của bài toán phát hiện và hiệu chỉnh lỗi ước lượng tư thế người 3D. Nội dung chương gồm ba phần chính. Phần thứ nhất trình bày ngữ cảnh của bài toán, bao gồm tái tạo chuyển động người 3D, monocular 3D pose estimation và nhu cầu refinement hậu xử lý. Phần thứ hai khảo sát các công trình nghiên cứu tương tự, phân tích ưu điểm, hạn chế và so sánh với định hướng của đồ án. Phần cuối trình bày các kiến thức nền tảng và công nghệ được sử dụng trong pipeline đề xuất.
+
+\section{Ngữ cảnh của bài toán}
+\label{sec:context}
+
+\subsection{Tái tạo chuyển động người 3D}
+Tái tạo chuyển động người 3D là bài toán suy diễn cấu trúc không gian và chuyển động của cơ thể người từ dữ liệu quan sát. Kết quả tái tạo thường được biểu diễn dưới dạng tọa độ khớp 3D, lưới cơ thể người hoặc tham số của mô hình cơ thể. Dữ liệu này được sử dụng trong nhiều bài toán như phân tích chuyển động, phục hồi chức năng, thể thao, mô phỏng, hoạt hình và tương tác người -- máy.
+
+Các hệ thống Motion Capture truyền thống thường sử dụng nhiều camera chuyên dụng, marker gắn trên cơ thể hoặc cảm biến quán tính để thu thập chuyển động. Các hệ thống này có độ chính xác cao, nhưng yêu cầu chi phí triển khai lớn, môi trường ghi hình được kiểm soát và quy trình hiệu chỉnh phức tạp. Vì vậy, các hướng markerless motion capture từ video RGB ngày càng được quan tâm do có khả năng triển khai với thiết bị phổ thông.
+
+Trong các hướng markerless, bài toán ước lượng tư thế người 3D từ video monocular có tính linh hoạt cao vì chỉ cần một camera RGB đầu vào. WHAM là một ví dụ tiêu biểu khi tái tạo chuyển động người trong hệ tọa độ toàn cục từ video monocular, kết hợp thông tin hình ảnh, chuỗi keypoint 2D, chuyển động camera và refinement dựa trên tiếp xúc chân \cite{shin2024wham}. Tuy nhiên, do chỉ quan sát từ một góc nhìn, kết quả monocular vẫn có thể sai lệch trong các tình huống che khuất, nhập nhằng chiều sâu hoặc chuyển động phức tạp.
+
+\subsection{Đặc điểm của monocular 3D pose estimation}
+Monocular 3D pose estimation là bài toán suy diễn pose 3D của cơ thể người từ một ảnh hoặc video RGB duy nhất. Đây là bài toán bất định vì ảnh đầu vào chỉ là hình chiếu 2D của cơ thể người, trong khi thông tin chiều sâu không được đo trực tiếp. Do đó, nhiều cấu hình pose 3D khác nhau có thể tạo ra hình chiếu 2D tương tự nhau.
+
+Trong thực tế, sai số monocular thường xuất hiện ở các khớp bị che khuất, các chi bị chồng lấp hoặc các chuyển động có biên độ lớn. PARE chỉ ra rằng nhiều phương pháp human body estimation phụ thuộc mạnh vào đặc trưng toàn cục, khiến mô hình nhạy với che khuất cục bộ; công trình này đề xuất cơ chế chú ý theo từng bộ phận cơ thể để khai thác thông tin từ các vùng còn quan sát được \cite{pare2021}. CLIFF cho thấy bước crop người trong các phương pháp top-down có thể làm mất thông tin vị trí trong toàn ảnh, ảnh hưởng đến ước lượng hướng quay toàn cục trong hệ tọa độ camera \cite{cliff2022}.
+
+Các lỗi nói trên không chỉ làm sai tọa độ khớp tại một frame, mà còn có thể làm giảm tính liên tục của toàn bộ chuỗi chuyển động. PhysCap chỉ ra rằng nhiều kết quả monocular có thể không hợp lý về mặt vật lý, chẳng hạn trượt chân, xuyên sàn, nghiêng người bất thường hoặc dịch chuyển mạnh theo chiều sâu \cite{physcap2020}. Vì vậy, bài toán của đồ án không dừng ở việc tạo pose 3D ban đầu, mà tập trung vào bước kiểm tra và hiệu chỉnh lỗi sau ước lượng.
+
+\subsection{Nhu cầu refinement hậu xử lý}
+Refinement hậu xử lý là bước cải thiện kết quả pose 3D sau khi đã có đầu ra từ mô hình ước lượng ban đầu. Bước này có thể sử dụng thông tin theo thời gian, nhiều góc nhìn hoặc các ràng buộc hình học và động học để giảm sai lệch. Trong bối cảnh đồ án, refinement không nhằm thay thế mô hình monocular, mà đóng vai trò như một lớp kiểm tra và hiệu chỉnh trên đầu ra của các mô hình có sẵn.
+
+Nhu cầu refinement xuất phát từ ba nguyên nhân chính. Thứ nhất, kết quả monocular thiếu cơ chế tự kiểm chứng khi xảy ra che khuất hoặc nhập nhằng chiều sâu. Thứ hai, chuỗi pose có thể thiếu ổn định theo thời gian, tạo ra rung giật hoặc biến đổi bất thường giữa các frame. Thứ ba, một pose có sai số tọa độ nhỏ vẫn có thể không hợp lý về mặt giải phẫu hoặc động học.
+
+Đồ án khai thác hai chuỗi pose 3D được ước lượng độc lập từ hai video monocular. Hai chuỗi này được sử dụng để kiểm tra sự nhất quán đa góc nhìn, phát hiện các khớp hoặc frame có khả năng sai, phân xử khi hai góc nhìn đưa ra kết quả mâu thuẫn và hiệu chỉnh pose dựa trên các ràng buộc phù hợp \cite{vu2026multiperspective}.
+
+\section{Các kết quả nghiên cứu tương tự}
+\label{sec:related_work}
+
+\subsection{Nhóm phương pháp monocular human pose và human mesh recovery}
+Các phương pháp monocular human pose estimation và human mesh recovery sử dụng ảnh hoặc video RGB để dự đoán tọa độ khớp 3D hoặc tham số mô hình cơ thể. PARE tập trung vào tính bền vững trước che khuất bằng cách sử dụng part-guided attention để khai thác thông tin từ các vùng cơ thể còn quan sát được \cite{pare2021}. CLIFF bổ sung thông tin vị trí trong toàn khung hình để giảm ảnh hưởng của bước crop trong pipeline top-down \cite{cliff2022}. WHAM mở rộng hướng monocular sang video và tái tạo chuyển động người trong hệ tọa độ toàn cục \cite{shin2024wham}.
+
+Ưu điểm của nhóm phương pháp này là yêu cầu phần cứng thấp và có thể triển khai với video RGB thông thường. Tuy nhiên, các mô hình monocular vẫn thiếu nguồn quan sát độc lập để kiểm chứng kết quả khi xảy ra che khuất, nhập nhằng chiều sâu hoặc chuyển động ngoài phân phối dữ liệu huấn luyện. Đây là lý do cần một bước hậu xử lý có khả năng đánh giá lỗi sau khi pose đã được sinh ra.
+
+\subsection{Nhóm phương pháp fitting và learned refinement}
+Các phương pháp fitting dựa trên mô hình cơ thể tham số đưa thêm tri thức hình học vào quá trình ước lượng. SMPLify khớp mô hình SMPL với keypoint 2D thông qua tối ưu sai số chiếu lại, từ đó ước lượng đồng thời pose và shape của cơ thể người \cite{smplify2016}. Learnable SMPLify tiếp cận bài toán inverse kinematics bằng mạng học sâu, nhằm thay thế một phần quá trình tối ưu lặp và giảm chi phí hiệu chỉnh \cite{yang2025learnable}.
+
+Nhóm phương pháp này có ưu điểm là tăng tính nhất quán hình học của pose. Tuy nhiên, kết quả fitting phụ thuộc nhiều vào chất lượng khởi tạo. Nếu pose đầu vào đã sai do che khuất hoặc sai chiều sâu, quá trình tối ưu có thể hội tụ tới nghiệm chưa phù hợp. Ngoài ra, các phương pháp tối ưu lặp thường có chi phí tính toán lớn khi áp dụng cho chuỗi video dài.
+
+\subsection{Nhóm phương pháp đa góc nhìn và không hiệu chỉnh chặt chẽ}
+Các phương pháp multi-view khai thác thông tin từ nhiều camera để giảm nhập nhằng chiều sâu. CanonPose sử dụng ràng buộc nhất quán đa góc nhìn để học bộ ước lượng monocular 3D pose từ dữ liệu multi-view không gán nhãn và không yêu cầu calibration theo cách truyền thống \cite{canonpose2021}. MTF-Transformer hợp nhất thông tin đa góc nhìn và thời gian bằng Transformer, đồng thời xử lý số lượng view và độ dài video thay đổi mà không cần camera calibration tường minh \cite{mtftransformer2023}. Probabilistic Triangulation mô hình hóa pose camera bằng phân phối xác suất thay vì giả định camera pose đã biết chính xác \cite{probtriangulation2023}. Gu và cộng sự đề xuất ước lượng pose 3D từ nhiều góc nhìn động bằng single-view pretraining kết hợp Procrustes alignment \cite{gu2024multiview}.
+
+Các nghiên cứu này cho thấy thông tin đa góc nhìn là tín hiệu quan trọng để cải thiện pose 3D. Tuy nhiên, phần lớn các phương pháp trên vẫn hướng tới bài toán ước lượng pose 3D trực tiếp trong kiến trúc mô hình hoặc trong quá trình huấn luyện. Phạm vi của đồ án khác ở chỗ đầu vào đã là hai chuỗi pose 3D độc lập từ hai monocular camera; nhiệm vụ chính là phát hiện và hiệu chỉnh lỗi trên kết quả đã có.
+
+\subsection{Nhóm phương pháp vật lý, động học và cơ sinh học}
+Các phương pháp vật lý và cơ sinh học đánh giá pose không chỉ theo tọa độ khớp, mà còn theo tính hợp lý của chuyển động. PhysCap bổ sung tối ưu hóa vật lý để giảm các lỗi như foot skating, floor penetration và tư thế không hợp lý trong monocular motion capture \cite{physcap2020}. OpenSim cung cấp nền tảng mô phỏng và phân tích chuyển động dựa trên mô hình cơ xương \cite{delp2007opensim}. OpenCap gốc sử dụng hai hoặc nhiều smartphone để thu thập dữ liệu và phân tích chuyển động người \cite{uhlrich2023opencap}. OpenCap Monocular tiếp tục sử dụng WHAM làm nguồn pose ban đầu, sau đó refinement và tính toán kinematics, kinetics từ một video điện thoại đơn \cite{gilon2026opencapmonocular}. SKEL nhấn mạnh vai trò của biểu diễn xương và ràng buộc cơ sinh học trong mô hình người 3D \cite{keller2023skin}.
+
+Các nghiên cứu trên cho thấy pose 3D cần hợp lý về cấu trúc và động học, không chỉ có sai số tọa độ nhỏ. Tuy nhiên, các solver vật lý hoặc cơ sinh học đầy đủ thường có chi phí tính toán và yêu cầu mô hình hóa cao. Do đó, trong đồ án này, các ràng buộc động học được sử dụng như lớp kiểm tra và hiệu chỉnh bổ trợ trong pipeline hậu xử lý.
+
+\subsection{So sánh các công trình liên quan}
+Bảng~\ref{tab:related_work_process} tóm tắt vị trí của đồ án so với các nhóm phương pháp liên quan. Các nhóm được gom theo đặc trưng đầu vào và mục tiêu xử lý để tránh liệt kê quá chi tiết từng công trình trong cùng một ô.
+
+\begin{table}[H]
+\centering
+\caption{So sánh quy trình giữa các hướng nghiên cứu liên quan}
+\label{tab:related_work_process}
+\begin{tabular}{|p{3.0cm}|p{2.9cm}|p{2.9cm}|p{3.1cm}|p{3.2cm}|}
+\hline
+\textbf{Nhóm phương pháp} & \textbf{Đầu vào} & \textbf{Đầu ra} & \textbf{Ưu điểm} & \textbf{Hạn chế so với bài toán đồ án} \\
+\hline
+Monocular human pose / mesh recovery & Ảnh hoặc video RGB một góc nhìn & Pose 3D, SMPL hoặc mesh & Dễ triển khai, chi phí phần cứng thấp & Thiếu nguồn quan sát độc lập để kiểm chứng lỗi \\
+\hline
+Fitting / learned refinement & Keypoint, pose hoặc SMPL khởi tạo & Pose/SMPL đã tinh chỉnh & Tăng tính nhất quán hình học & Phụ thuộc chất lượng khởi tạo, có thể tốn chi phí tối ưu \\
+\hline
+Multi-view pose estimation & Nhiều góc nhìn & Pose 3D từ dữ liệu đa góc nhìn & Giảm nhập nhằng chiều sâu & Thường cần mô hình multi-view hoặc suy luận quan hệ camera \\
+\hline
+Physics / biomechanics-aware methods & Pose, video hoặc mô hình cơ thể & Chuyển động có ràng buộc vật lý/cơ sinh học & Cải thiện tính hợp lý của chuyển động & Solver phức tạp, khó tích hợp đầy đủ vào pipeline nhẹ \\
+\hline
+Phương pháp của đồ án & Hai chuỗi pose 3D từ hai video monocular & Pose 3D sau phát hiện và hiệu chỉnh lỗi & Tập trung hậu xử lý, kiểm chứng chéo giữa hai view & Phụ thuộc chất lượng đồng bộ, căn chỉnh và dữ liệu đầu vào \\
+\hline
+\end{tabular}
+\end{table}
+
+Các tiêu chí đánh giá định lượng được chuyển sang Chương 5 để gắn chặt với phần thực nghiệm và tránh trùng vai trò giữa mô tả lý thuyết và trình bày kết quả.
+
+\section{Biểu diễn pose 2D, pose 3D và skeleton}
+\label{sec:theory_pose}
+Trong bài toán pose estimation, cơ thể người thường được biểu diễn bằng tập các điểm khớp. Pose 2D biểu diễn vị trí các khớp trên mặt phẳng ảnh, còn pose 3D biểu diễn tọa độ các khớp trong không gian ba chiều. Các khớp thường gồm vai, khuỷu tay, cổ tay, hông, đầu gối, cổ chân và một số điểm trên thân người.
+
+Skeleton mô tả quan hệ nối giữa các khớp, tạo thành cấu trúc hình học gần đúng của cơ thể người. Cấu trúc này cho phép tính các đại lượng như chiều dài xương, góc khớp, vận tốc khớp và gia tốc khớp. Trong bài toán refinement, skeleton được sử dụng để phát hiện các biến dạng bất thường, ví dụ chiều dài xương thay đổi lớn giữa các frame hoặc một khớp di chuyển không phù hợp với các khớp lân cận.
+
+Hình~\ref{fig:keypoints3d} minh họa cấu trúc keypoints 3D và các liên kết xương được sử dụng làm cơ sở cho các bước kiểm tra hình học trong pipeline.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.42\textwidth]{figures/keypoints.png}
+    \caption{Minh họa skeleton keypoints 3D và cấu trúc nối giữa các khớp}
+    \label{fig:keypoints3d}
+\end{figure}
+
+\section{Mô hình cơ thể tham số SMPL}
+\label{sec:theory_smpl}
+SMPL là mô hình cơ thể tham số được sử dụng rộng rãi trong human mesh recovery và human pose estimation. Mô hình này biểu diễn cơ thể người bằng một lưới tam giác, trong đó hình dạng cơ thể được điều khiển bởi tham số shape và tư thế được điều khiển bởi tham số pose \cite{smpl2015}. Từ các tham số này, SMPL có thể sinh ra mesh 3D và tọa độ các khớp tương ứng.
+
+Ưu điểm của SMPL là biểu diễn pose và shape trong cùng một không gian tham số, giúp duy trì tính nhất quán hình học của cơ thể. Các phương pháp như SMPLify sử dụng SMPL để khớp mô hình 3D với quan sát 2D thông qua tối ưu hóa \cite{smplify2016}. Trong đồ án, SMPL và các tham số cơ thể được xem là một biểu diễn đầu vào hoặc biểu diễn trung gian, phục vụ cho quá trình căn chỉnh, kiểm tra và hiệu chỉnh pose.
+
+\section{Hệ tọa độ camera, hệ tọa độ thế giới và căn chỉnh pose}
+\label{sec:theory_coords}
+Pose 3D có thể được biểu diễn trong hệ tọa độ camera hoặc hệ tọa độ thế giới. Hệ tọa độ camera mô tả vị trí các khớp tương đối với camera quan sát. Hệ tọa độ thế giới mô tả chuyển động trong một không gian toàn cục độc lập với từng camera. WHAM là một ví dụ về hướng tái tạo chuyển động người trong hệ tọa độ toàn cục từ video monocular \cite{shin2024wham}.
+
+Trong bài toán đa góc nhìn, hai chuỗi pose từ hai camera khác nhau cần được đưa về cùng một không gian so sánh. Một cách phổ biến là sử dụng phép căn chỉnh hình học, chẳng hạn Procrustes alignment, để tìm phép biến đổi gồm tịnh tiến, quay và tỉ lệ giữa hai tập điểm tương ứng. Gu và cộng sự sử dụng Procrustes alignment trong bài toán ước lượng pose 3D từ nhiều góc nhìn động \cite{gu2024multiview}. Trong đồ án, căn chỉnh pose là bước tiền đề để đánh giá sai khác giữa hai chuỗi pose.
+
+\section{Nhất quán đa góc nhìn}
+\label{sec:theory_multiview}
+Nhất quán đa góc nhìn là nguyên tắc cho rằng các kết quả pose 3D được suy ra từ các góc nhìn khác nhau của cùng một chuyển động cần tương thích với nhau sau khi được căn chỉnh về một không gian chung. Nếu cùng một khớp hoặc đoạn xương có sai khác lớn giữa hai góc nhìn, sai khác đó có thể là dấu hiệu của lỗi ước lượng.
+
+Các nghiên cứu như CanonPose, MTF-Transformer và Probabilistic Triangulation đều khai thác thông tin đa góc nhìn để cải thiện pose 3D hoặc giảm phụ thuộc vào calibration chặt chẽ \cite{canonpose2021,mtftransformer2023,probtriangulation2023}. Trong đồ án, nguyên tắc này được sử dụng ở vai trò hậu xử lý: không huấn luyện mô hình multi-view mới, mà dùng sự không nhất quán giữa hai chuỗi pose đã có để phát hiện lỗi và hỗ trợ hiệu chỉnh.
+
+\section{Ràng buộc thời gian}
+\label{sec:theory_temporal}
+Ràng buộc thời gian phản ánh tính liên tục của chuyển động người trong video. Trong điều kiện bình thường, tọa độ khớp, góc khớp và vận tốc khớp không thay đổi đột ngột giữa hai frame liên tiếp, trừ khi có chuyển động nhanh phù hợp với ngữ cảnh. Vì vậy, các biến đổi bất thường theo thời gian có thể được dùng làm tín hiệu phát hiện lỗi.
+
+Trong pipeline refinement, ràng buộc thời gian có thể được mô hình hóa bằng các thành phần phạt trên vận tốc, gia tốc hoặc sai khác pose giữa các frame liên tiếp. Ràng buộc này giúp giảm rung giật và cải thiện độ mượt của chuỗi chuyển động. Tuy nhiên, việc làm mượt cần được kiểm soát để không triệt tiêu các chuyển động nhanh có thật.
+
+\section{Ràng buộc động học và cơ sinh học}
+\label{sec:theory_kinematics}
+Ràng buộc động học mô tả các điều kiện hình học và chuyển động cơ bản của cơ thể người. Ví dụ, chiều dài xương của cùng một người gần như không thay đổi theo thời gian, và các khớp chỉ có thể chuyển động trong một phạm vi nhất định. Các ràng buộc này giúp phát hiện các pose có skeleton biến dạng hoặc chuyển động vượt quá cấu trúc tự nhiên của cơ thể.
+
+Ràng buộc cơ sinh học mô tả cơ thể người ở mức chi tiết hơn, bao gồm cấu trúc xương, giới hạn khớp, cơ và lực tác động. OpenSim cung cấp nền tảng mô phỏng chuyển động dựa trên mô hình cơ xương \cite{delp2007opensim}. SKEL nhấn mạnh tầm quan trọng của biểu diễn xương và ràng buộc cơ sinh học trong mô hình cơ thể người 3D \cite{keller2023skin}. Trong đồ án, các ràng buộc này được sử dụng ở mức phù hợp với pipeline hậu xử lý, tập trung vào chiều dài xương, độ ổn định chuyển động và tính hợp lý của pose.
+
+\section{Công nghệ và thư viện sử dụng}
+\label{sec:tech}
+
+\subsection{WHAM}
+WHAM được sử dụng như một nguồn sinh pose 3D ban đầu từ video monocular. Mô hình này tái tạo chuyển động người trong hệ tọa độ toàn cục bằng cách kết hợp đặc trưng hình ảnh, chuỗi keypoint 2D, chuyển động camera và refinement dựa trên tiếp xúc chân \cite{shin2024wham}. Trong đồ án, WHAM không phải là đóng góp chính mà đóng vai trò backbone để tạo dữ liệu đầu vào cho bước hậu xử lý.
+
+\subsection{SMPL và SMPLify}
+SMPL cung cấp biểu diễn tham số cho cơ thể người, cho phép chuyển đổi giữa pose, shape, mesh và tọa độ khớp \cite{smpl2015}. SMPLify sử dụng mô hình SMPL để khớp pose và shape với quan sát 2D thông qua tối ưu hóa \cite{smplify2016}. Các biểu diễn này hỗ trợ việc áp dụng ràng buộc hình học, tính chiều dài xương và kiểm tra tính hợp lý của pose trong pipeline refinement.
+
+\subsection{OpenSim và các mô hình cơ sinh học}
+OpenSim là nền tảng mã nguồn mở dùng để xây dựng và phân tích mô phỏng chuyển động dựa trên mô hình cơ xương \cite{opensim_software,delp2007opensim}. OpenCap gốc cho thấy hướng kết hợp computer vision với mô phỏng cơ xương cho dữ liệu từ hai hoặc nhiều smartphone \cite{uhlrich2023opencap}. Trong đồ án, các hệ thống này được sử dụng như cơ sở tham khảo cho các ràng buộc động học và cơ sinh học, không thay thế trực tiếp pipeline bằng một solver cơ sinh học đầy đủ.
+
+\subsection{Learnable SMPLify}
+Learnable SMPLify là hướng tiếp cận sử dụng mạng học sâu để giải bài toán inverse kinematics thay cho tối ưu lặp truyền thống \cite{yang2025learnable}. Hướng này phù hợp với mục tiêu xây dựng bước refinement có chi phí thấp hơn so với các solver tối ưu hóa đầy đủ. Trong đồ án, Learnable SMPLify được xem là một thành phần tham khảo hoặc mô-đun có thể tích hợp ở bước hiệu chỉnh pose cuối cùng.
+
+\section*{Kết chương}
+Chương này đã trình bày ngữ cảnh của bài toán phát hiện và hiệu chỉnh lỗi ước lượng tư thế người 3D. Các khó khăn của monocular 3D pose estimation đã được phân tích, bao gồm nhập nhằng chiều sâu, che khuất, thiếu ổn định thời gian và các pose không hợp lý về động học.
+
+Chương cũng đã khảo sát các nhóm nghiên cứu tương tự, bao gồm monocular human pose estimation, fitting/refinement, multi-view pose estimation và các hướng vật lý, cơ sinh học. Các bảng so sánh cho thấy khoảng trống của đồ án nằm ở bước hậu xử lý hai chuỗi pose 3D đã được sinh ra độc lập, thay vì huấn luyện một mô hình pose estimation mới.
+
+Các kiến thức nền tảng về pose 2D/3D, skeleton, SMPL, hệ tọa độ, căn chỉnh pose, nhất quán đa góc nhìn, ràng buộc thời gian và ràng buộc động học đã được phân tích chi tiết làm cơ sở cho phương pháp đề xuất. Chương tiếp theo sẽ trình bày kiến trúc pipeline và các bước xử lý cụ thể của hệ thống phát hiện và hiệu chỉnh lỗi pose 3D.
+
+\end{document}

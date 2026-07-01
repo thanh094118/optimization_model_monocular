@@ -1,6 +1,9 @@
 models/
-output/
-conversation_cache/
+outputs/
+inputs/
+input/
+a/
+# conversation_cache/
 *.md
 __pycache__/
 *.pyc

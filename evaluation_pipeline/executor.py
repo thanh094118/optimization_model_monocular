@@ -4,360 +4,286 @@ import csv
 import json
 import re
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from scipy.spatial import procrustes
 
-from evaluation_pipeline.config import MODULE_INPUT_KEYS, MODULE_KEYPOINT_SUBDIR
-from evaluation_pipeline.logs import (
-    log_disabled,
-    log_done,
-    log_module_eval,
-    log_module_skip,
-)
-from json_io import write_json
+from keypoints_map import load_keypoints3d_map
+from evaluation_pipeline.logs import log_disabled, log_done
 
-ARM_LEG_KEYS = {
-    "left_shoulder", "right_shoulder",
-    "left_elbow", "right_elbow",
-    "left_hip", "right_hip",
-    "left_knee", "right_knee",
-}
-
-RELIABLE_KEYS = {
-    "left_shoulder", "right_shoulder",
-    "left_hip", "right_hip",
-}
-
-STANDARD_KEYS = [
-    "spine3", "spine4", "spine2", "spine", "pelvis", "neck", "head", "head_top",
-    "left_clavicle", "left_shoulder", "left_elbow", "left_wrist", "left_hand",
-    "right_clavicle", "right_shoulder", "right_elbow", "right_wrist", "right_hand",
-    "left_hip", "left_knee", "left_ankle", "left_foot", "left_toe",
-    "right_hip", "right_knee", "right_ankle", "right_foot", "right_toe",
-]
-
-ALIASES = {
-    "RShoulder": "right_shoulder", "LShoulder": "left_shoulder",
-    "RElbow": "right_elbow", "LElbow": "left_elbow",
-    "RWrist": "right_wrist", "LWrist": "left_wrist",
-    "RHip": "right_hip", "LHip": "left_hip",
-    "RKnee": "right_knee", "LKnee": "left_knee",
-    "RAnkle": "right_ankle", "LAnkle": "left_ankle",
-    "Neck": "neck", "MidHip": "pelvis",
-    "RBigToe": "right_toe", "LBigToe": "left_toe",
-    "RHeel": "right_foot", "LHeel": "left_foot",
-    "Nose": "head", "REye": "head", "LEye": "head",
+MODULES = ["posed", "fused", "learnable", "optimized"]
+CAMERAS = ["camera1", "camera2"]
+CAMERA_FILE_NAMES = {
+    "camera1": "cam1",
+    "camera2": "cam2",
 }
 
 
-def _frame_index(path: Path) -> int:
-    nums = re.findall(r"\d+", path.stem)
+def _camera_key_from_video_path(video_path: Optional[str]) -> str:
+    if not video_path:
+        return "camera1"
+    stem = Path(video_path).stem
+    match = re.search(r"video_(\d+)", stem)
+    if match:
+        return f"camera{int(match.group(1))}"
+    match = re.search(r"camera_(\d+)", stem)
+    if match:
+        return f"camera{int(match.group(1))}"
+    nums = re.findall(r"\d+", stem)
+    if nums:
+        return f"camera{int(nums[-1])}"
+    return "camera1"
+
+def _frame_index_from_path(p: Path) -> int:
+    nums = re.findall(r"\d+", p.stem)
     return int(nums[-1]) if nums else -1
 
+def _resolve_root_joint(joints: dict) -> np.ndarray:
+    if "left_hip" in joints and "right_hip" in joints:
+        return (joints["left_hip"] + joints["right_hip"]) / 2.0
+    raise ValueError("Missing left_hip or right_hip for root alignment")
 
-def _find_keypoints_path(data):
-    candidates = []
+def _compute_mpjpe(pred: dict[str, np.ndarray], truth: dict[str, np.ndarray], keys: list[str]) -> float:
+    pred_root = _resolve_root_joint(pred)
+    truth_root = _resolve_root_joint(truth)
+    
+    errors = []
+    for k in keys:
+        p = pred[k] - pred_root
+        t = truth[k] - truth_root
+        errors.append(np.linalg.norm(p - t) * 1000.0)
+    return float(np.mean(errors))
 
-    def recurse(node, current_path):
-        if isinstance(node, dict):
-            values = list(node.values())
-            if values and all(
-                isinstance(v, (list, tuple)) and len(v) == 3 and
-                all(isinstance(x, (int, float)) for x in v)
-                for v in values
-            ):
-                candidates.append(current_path)
-            else:
-                for k, v in node.items():
-                    new_path = f"{current_path}.{k}" if current_path else k
-                    recurse(v, new_path)
-
-    recurse(data, "")
-
-    for cand in candidates:
-        if "annot3" in cand or "keypoints" in cand:
-            return cand
-    return candidates[0] if candidates else None
-
-
-def _load_points_auto(path: Path, default_path="annotations.annot3.keypoints") -> dict[str, np.ndarray]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    try:
-        node = data
-        for key in default_path.split("."):
-            node = node[key]
-        if isinstance(node, dict):
-            sample = next(iter(node.values()))
-            if isinstance(sample, (list, tuple)) and len(sample) == 3:
-                return {k: np.asarray(v, dtype=float) for k, v in node.items()}
-    except Exception:
-        pass
-
-    found = _find_keypoints_path(data)
-    if found:
-        node = data
-        for key in found.split("."):
-            node = node[key]
-        return {k: np.asarray(v, dtype=float) for k, v in node.items()}
-
-    raise ValueError(f"Cannot find 3D keypoints in {path}")
-
-
-def _load_pred_with_cameras(path: Path) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    # Standard pipeline outputs: {"camera1": {...}, "camera2": {...}}
-    if isinstance(data, dict) and "camera1" in data and "camera2" in data:
-        cam1 = data.get("camera1")
-        cam2 = data.get("camera2")
-        if isinstance(cam1, dict) and isinstance(cam2, dict):
-            return (
-                {k: np.asarray(v, dtype=float) for k, v in cam1.items()},
-                {k: np.asarray(v, dtype=float) for k, v in cam2.items()},
-            )
-
-    # Legacy or other layouts: fallback to a single set for both cameras.
-    single = _load_points_auto(path)
-    return single, single
-
-
-def _load_truth_with_cameras(file_path: Path, testcase_name: str) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
-    with file_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    testcase_data = data.get(testcase_name)
-    if testcase_data is None:
-        if len(data) == 1:
-            testcase_data = next(iter(data.values()))
-        else:
-            raise KeyError(f"Missing testcase {testcase_name!r} in {file_path}")
-
-    kp_cam1 = testcase_data.get("camera1")
-    kp_cam2 = testcase_data.get("camera2")
-    if kp_cam1 is None or kp_cam2 is None:
-        raise ValueError(f"Missing camera1/camera2 in truth file: {file_path}")
-
-    return (
-        {k: np.asarray(v, dtype=float) for k, v in kp_cam1.items()},
-        {k: np.asarray(v, dtype=float) for k, v in kp_cam2.items()},
-    )
-
-
-def _normalize_key(k: str) -> str:
-    return ALIASES.get(k, k)
-
-
-def _auto_map_keys(pred_keys: list[str], truth_keys: list[str]) -> list[tuple[str, str]]:
-    std_index = {k: i for i, k in enumerate(STANDARD_KEYS)}
-    truth_norm_to_raw = {_normalize_key(tk): tk for tk in truth_keys}
-
-    mapping = []
-    for pk in pred_keys:
-        pk_norm = _normalize_key(pk)
-        if pk_norm in truth_norm_to_raw:
-            mapping.append((pk, truth_norm_to_raw[pk_norm]))
-            continue
-        if pk_norm in std_index:
-            fi = std_index[pk_norm]
-            matched = next(
-                (tk for tk in truth_keys if _normalize_key(tk) in std_index and std_index[_normalize_key(tk)] == fi),
-                None,
-            )
-            if matched:
-                mapping.append((pk, matched))
-    return mapping
-
-
-def _compute_pa_mpjpe(pred_joints: dict, truth_joints: dict, joint_pairs: list[tuple[str, str]]) -> dict[str, float]:
-    valid_pairs = [(pk, tk) for pk, tk in joint_pairs if pk in pred_joints and tk in truth_joints]
-    if not valid_pairs:
-        return {}
-
-    pred_matrix = np.asarray([pred_joints[pk] for pk, _ in valid_pairs], dtype=float)
-    truth_matrix = np.asarray([truth_joints[tk] for _, tk in valid_pairs], dtype=float)
-
-    truth_centered = truth_matrix - np.mean(truth_matrix, axis=0)
+def _compute_pa_mpjpe(pred: dict[str, np.ndarray], truth: dict[str, np.ndarray], keys: list[str]) -> float:
+    pred_mat = np.array([pred[k] for k in keys], dtype=float)
+    truth_mat = np.array([truth[k] for k in keys], dtype=float)
+    
+    truth_centered = truth_mat - np.mean(truth_mat, axis=0)
     norm_truth = np.linalg.norm(truth_centered)
+    if norm_truth < 1e-6:
+        return 0.0
+        
+    mtx1, mtx2, _ = procrustes(truth_mat, pred_mat)
+    distances = np.linalg.norm(mtx1 * norm_truth - mtx2 * norm_truth, axis=1) * 1000.0
+    return float(np.mean(distances))
 
-    mtx1, mtx2, _ = procrustes(truth_matrix, pred_matrix)
+def _compute_pck_mm(pred: dict[str, np.ndarray], truth: dict[str, np.ndarray], keys: list[str]) -> float:
+    # PCK-mm is mean Euclidean distance (absolute, no root align)
+    errors = []
+    for k in keys:
+        p = pred[k]
+        t = truth[k]
+        errors.append(np.linalg.norm(p - t) * 1000.0)
+    return float(np.mean(errors))
 
-    mtx1_real = mtx1 * norm_truth
-    mtx2_real = mtx2 * norm_truth
-    distances = np.linalg.norm(mtx1_real - mtx2_real, axis=1) * 1000.0
-
-    return {pk: float(dist) for (pk, _), dist in zip(valid_pairs, distances)}
+def _load_json(p: Path) -> dict:
+    with p.open("r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def _evaluate_single_pred_dir(pred_dir: Path, truth_dir: Path, testcase_name: str, logs: list[str]) -> dict:
-    pred_files = sorted([p for p in pred_dir.glob("*.json") if _frame_index(p) != -1], key=_frame_index)
-    truth_files = sorted([p for p in truth_dir.glob("*.json") if _frame_index(p) != -1], key=_frame_index)
+def _load_frame_map(frame_dir: Path, frame_offset: int = 0) -> dict[int, Path]:
+    frame_map = {}
+    for path in frame_dir.glob("*.json"):
+        frame_idx = _frame_index_from_path(path)
+        if frame_idx < 0:
+            raise ValueError(f"Cannot extract frame index from {path}")
+        frame_idx += frame_offset
+        if frame_idx in frame_map:
+            raise ValueError(f"Duplicate frame index {frame_idx} in {frame_dir}")
+        frame_map[frame_idx] = path
+    return frame_map
 
-    if not pred_files:
-        raise FileNotFoundError(f"No JSON files in pred dir: {pred_dir}")
-    if not truth_files:
-        raise FileNotFoundError(f"No JSON files in truth dir: {truth_dir}")
 
-    pred_by_frame = {_frame_index(p): p for p in pred_files}
-    truth_by_frame = {_frame_index(p): p for p in truth_files}
-    common_frame_ids = sorted(set(pred_by_frame.keys()) & set(truth_by_frame.keys()))
-
-    if not common_frame_ids:
-        raise ValueError(f"No common frame_id between pred={pred_dir} and truth={truth_dir}")
-
-    missing_in_truth = sorted(set(pred_by_frame.keys()) - set(truth_by_frame.keys()))
-    missing_in_pred = sorted(set(truth_by_frame.keys()) - set(pred_by_frame.keys()))
-    if missing_in_truth:
-        logs.append(f"[WARN] Frames missing in truth: {missing_in_truth[:20]}{'...' if len(missing_in_truth) > 20 else ''}")
-    if missing_in_pred:
-        logs.append(f"[WARN] Frames missing in pred: {missing_in_pred[:20]}{'...' if len(missing_in_pred) > 20 else ''}")
-
-    stats = {
-        "CAM1": {"frame_data": [], "all": [], "arm_leg": [], "reliable": []},
-        "CAM2": {"frame_data": [], "all": [], "arm_leg": [], "reliable": []},
-    }
-    joint_pairs_cache = {}
-
-    for frame_id in common_frame_ids:
-        pred_path = pred_by_frame[frame_id]
-        truth_path = truth_by_frame[frame_id]
-
-        try:
-            pred_cam1, pred_cam2 = _load_pred_with_cameras(pred_path)
-            truth_cam1, truth_cam2 = _load_truth_with_cameras(truth_path, testcase_name)
-        except Exception as exc:
-            logs.append(f"[ERR] {pred_path.name}: {exc}")
+def _filter_frame_map_by_range(frame_map: dict[int, Path], start_frame: Optional[int], end_frame: Optional[int]) -> dict[int, Path]:
+    if start_frame is None and end_frame is None:
+        return frame_map
+    filtered = {}
+    for frame_idx, path in frame_map.items():
+        if start_frame is not None and frame_idx < start_frame:
             continue
-
-        for cam_name, pred_joints, truth_joints in (
-            ("CAM1", pred_cam1, truth_cam1),
-            ("CAM2", pred_cam2, truth_cam2),
-        ):
-            cache_key = (cam_name, tuple(sorted(pred_joints.keys())), tuple(sorted(truth_joints.keys())))
-            if cache_key not in joint_pairs_cache:
-                joint_pairs_cache[cache_key] = _auto_map_keys(sorted(pred_joints.keys()), sorted(truth_joints.keys()))
-            joint_pairs = joint_pairs_cache[cache_key]
-            if not joint_pairs:
-                logs.append(f"[WARN] {cam_name} cannot map joints for {pred_path.name}")
-                continue
-
-            errors = _compute_pa_mpjpe(pred_joints, truth_joints, joint_pairs)
-            if not errors:
-                continue
-
-            all_mean = float(np.mean(list(errors.values())))
-            al_vals = [v for k, v in errors.items() if _normalize_key(k) in ARM_LEG_KEYS]
-            rel_vals = [v for k, v in errors.items() if _normalize_key(k) in RELIABLE_KEYS]
-            al_mean = float(np.mean(al_vals)) if al_vals else float("nan")
-            rel_mean = float(np.mean(rel_vals)) if rel_vals else float("nan")
-
-            stats[cam_name]["all"].append(all_mean)
-            if al_vals:
-                stats[cam_name]["arm_leg"].append(al_mean)
-            if rel_vals:
-                stats[cam_name]["reliable"].append(rel_mean)
-            stats[cam_name]["frame_data"].append({"frame": frame_id, "all": all_mean, "arm_leg": al_mean, "reliable": rel_mean})
-
-    final = {}
-    for cam in ("CAM1", "CAM2"):
-        if not stats[cam]["all"]:
+        if end_frame is not None and frame_idx > end_frame:
             continue
-        final[cam] = {
-            "cam": cam,
-            "mpjpe_all": float(np.mean(stats[cam]["all"])),
-            "mpjpe_arm_leg": float(np.mean(stats[cam]["arm_leg"])) if stats[cam]["arm_leg"] else float("nan"),
-            "mpjpe_reliable": float(np.mean(stats[cam]["reliable"])) if stats[cam]["reliable"] else float("nan"),
-            "frames": len(stats[cam]["frame_data"]),
-            "frame_data": stats[cam]["frame_data"],
-        }
-    return final
+        filtered[frame_idx] = path
+    return filtered
 
 
-def _write_module_csv(module_name: str, cam: str, result: dict, output_dir: Path) -> None:
-    csv_path = output_dir / f"pa_mpjpe_{module_name}_{cam.lower()}.csv"
-    with csv_path.open("w", newline="", encoding="utf-8") as cf:
-        cf.write("sep=,\n")
-        writer = csv.writer(cf)
-        writer.writerow(["Frame", "Toan_than", "Tay_Chan_8key", "Uy_tin_Vai_Hong"])
-        for fdata in result["frame_data"]:
-            writer.writerow([
-                fdata["frame"],
-                f"{fdata['all']:.2f}",
-                f"{fdata['arm_leg']:.2f}" if not np.isnan(fdata["arm_leg"]) else "",
-                f"{fdata['reliable']:.2f}" if not np.isnan(fdata["reliable"]) else "",
-            ])
-        writer.writerow([
-            "AVERAGE",
-            f"{result['mpjpe_all']:.2f}",
-            f"{result['mpjpe_arm_leg']:.2f}" if not np.isnan(result["mpjpe_arm_leg"]) else "",
-            f"{result['mpjpe_reliable']:.2f}" if not np.isnan(result["mpjpe_reliable"]) else "",
-        ])
+def _resolve_selected_frame_window(config: dict) -> tuple[Optional[int], Optional[int]]:
+    runtime_cfg = config.get("runtime", {})
+    preprocess_cfg = config.get("preprocess", {})
+
+    start_frame = runtime_cfg.get("selected_frame_start", preprocess_cfg.get("start_frame"))
+    end_frame = runtime_cfg.get("selected_frame_end", preprocess_cfg.get("end_frame"))
+
+    start_frame = None if start_frame in (None, "") else int(start_frame)
+    end_frame = None if end_frame in (None, "") else int(end_frame)
+    return start_frame, end_frame
 
 
-def _build_module_inputs(paths: dict) -> dict[str, Path]:
-    module_inputs = {
-        module_name: Path(paths[path_key]) / MODULE_KEYPOINT_SUBDIR
-        for module_name, path_key in MODULE_INPUT_KEYS.items()
-    }
+def _resolve_truth_frame_payload(truth_data: dict, testcase_name: Optional[str], truth_path: Path) -> dict:
+    if testcase_name is not None:
+        tc_data = truth_data.get(testcase_name)
+        if tc_data is None:
+            raise ValueError(f"Missing testcase {testcase_name} in {truth_path}")
+        if not isinstance(tc_data, dict):
+            raise ValueError(f"Invalid testcase payload for {testcase_name} in {truth_path}")
+        return tc_data
 
-    fused_dir = Path(paths.get("fused_output_dir", "output/fused_results"))
-    for debug_name in ("debug1", "debug2"):
-        debug_dir = fused_dir / debug_name
-        if debug_dir.exists():
-            module_inputs[f"fusion_{debug_name}"] = debug_dir
+    camera_keys = [key for key in truth_data if re.fullmatch(r"camera\d+", str(key))]
+    if camera_keys:
+        return truth_data
 
-    return module_inputs
+    if len(truth_data) != 1:
+        raise ValueError(
+            f"Expected either camera* keys or exactly one top-level testcase entry in {truth_path} "
+            "when evaluation.testcase_name is null"
+        )
 
+    tc_data = next(iter(truth_data.values()))
+    if not isinstance(tc_data, dict):
+        raise ValueError(f"Invalid top-level testcase payload in {truth_path}")
+    return tc_data
 
 def run_evaluation(config: dict) -> None:
-    paths = config["paths"]
-    runtime_cfg = config.get("runtime", {})
     eval_cfg = config.get("evaluation", {})
-
     if not eval_cfg.get("enabled", True):
         log_disabled()
         return
 
+    paths = config["paths"]
+    map_data = load_keypoints3d_map(paths["keypoints3d_map"])
+    canonical_names = set([k["name"] for k in map_data["keypoints"]])
+    priority1_names = map_data.get("priority1", [])
+    priority2_names = map_data.get("priority2", [])
+
     truth_dir = Path(eval_cfg.get("ground_truth_dir", "input/gtruth_results"))
+    out_dir = Path(paths.get("evaluation_output_dir", "output/evaluation_results"))
     testcase_name = eval_cfg.get("testcase_name", "testcase1")
-    output_dir = Path(paths.get("evaluation_output_dir", "output/evaluation_results"))
+    start_frame, end_frame = _resolve_selected_frame_window(config)
 
-    module_inputs = _build_module_inputs(paths)
-
-    if runtime_cfg.get("clean_output", True):
-        output_dir.mkdir(parents=True, exist_ok=True)
-        for old in output_dir.glob("*.csv"):
+    if config.get("runtime", {}).get("clean_output", True):
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for old in out_dir.glob("*.csv"):
             old.unlink()
-        for old in output_dir.glob("*.json"):
-            old.unlink()
-        log_file = output_dir / "evaluation_log.txt"
-        if log_file.exists():
-            log_file.unlink()
     else:
-        output_dir.mkdir(parents=True, exist_ok=True)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    if not truth_dir.exists():
-        raise FileNotFoundError(f"Ground truth directory not found: {truth_dir}")
+    module_dirs = {
+        "posed": Path(paths["pose_output_dir"]) / "keypoints3d",
+        "fused": Path(paths["fused_output_dir"]) / "keypoints3d",
+        "learnable": Path(paths["learnable_output_dir"]) / "keypoints3d",
+        "optimized": Path(paths["optimized_output_dir"]) / "keypoints3d",
+    }
 
-    all_results = {}
-    logs: list[str] = []
+    for name, mdir in module_dirs.items():
+        if not mdir.exists():
+            raise FileNotFoundError(f"Missing required module directory: {mdir}")
 
-    for module_name, pred_dir in module_inputs.items():
-        if not pred_dir.exists():
-            log_module_skip(module_name, str(pred_dir))
-            continue
-        log_module_eval(module_name, str(pred_dir))
-        result = _evaluate_single_pred_dir(pred_dir, truth_dir, testcase_name, logs)
-        all_results[module_name] = result
-        for cam in ("CAM1", "CAM2"):
-            if cam in result:
-                _write_module_csv(module_name, cam, result[cam], output_dir)
+    truth_frame_map = _load_frame_map(truth_dir, frame_offset=1)
+    truth_frame_map = _filter_frame_map_by_range(truth_frame_map, start_frame, end_frame)
+    if not truth_frame_map:
+        raise ValueError(f"No ground truth frames found in {truth_dir}")
 
-    write_json(output_dir / "summary.json", all_results)
-    if logs:
-        (output_dir / "evaluation_log.txt").write_text("\n".join(logs), encoding="utf-8")
+    gt_camera_keys = {
+        "camera1": _camera_key_from_video_path(paths.get("camera1_video")),
+        "camera2": _camera_key_from_video_path(paths.get("camera2_video")),
+    }
 
-    log_done(str(output_dir))
+    truth_frames = set(truth_frame_map)
+    module_frame_maps = {}
+    for name, mdir in module_dirs.items():
+        module_frame_maps[name] = _filter_frame_map_by_range(_load_frame_map(mdir), start_frame, end_frame)
+        mframes = set(module_frame_maps[name])
+        if mframes != truth_frames:
+            raise ValueError(f"Frame mismatch in module {name}. Expected {sorted(truth_frames)}, got {sorted(mframes)}")
+
+    frames = sorted(truth_frames)
+    
+    # metrics: metric -> cam -> frame -> module -> priority -> value
+    results = {
+        "MPJPE": {"camera1": {}, "camera2": {}},
+        "PA-MPJPE": {"camera1": {}, "camera2": {}},
+        "PCK": {"camera1": {}, "camera2": {}},
+    }
+
+    for frame in frames:
+        truth_path = truth_frame_map[frame]
+        truth_data = _load_json(truth_path)
+        tc_data = _resolve_truth_frame_payload(truth_data, testcase_name, truth_path)
+
+        for cam in CAMERAS:
+            gt_cam = gt_camera_keys[cam]
+            if gt_cam not in tc_data:
+                raise ValueError(f"Missing {gt_cam} in {truth_path}")
+            
+            truth_joints = {k: np.array(v, dtype=float) for k, v in tc_data[gt_cam].items()}
+            if not canonical_names.issubset(truth_joints.keys()):
+                raise ValueError(f"Truth {gt_cam} frame {frame} missing keys. Expected {canonical_names}")
+
+            for metric in results:
+                if frame not in results[metric][cam]:
+                    results[metric][cam][frame] = {}
+
+            for mod in MODULES:
+                mod_path = module_frame_maps[mod][frame]
+                mod_data = _load_json(mod_path)
+                if cam not in mod_data:
+                    raise ValueError(f"Missing {cam} in {mod_path}")
+                
+                pred_joints = {k: np.array(v, dtype=float) for k, v in mod_data[cam].items()}
+                if set(pred_joints) != canonical_names:
+                    raise ValueError(
+                        f"Module {mod} {cam} frame {frame} must contain exactly canonical 21 keys. "
+                        f"Expected {sorted(canonical_names)}, got {sorted(pred_joints)}"
+                    )
+                
+                # compute metrics
+                # MPJPE
+                results["MPJPE"][cam][frame].setdefault(mod, {})
+                results["MPJPE"][cam][frame][mod]["priority1_mm"] = _compute_mpjpe(pred_joints, truth_joints, priority1_names)
+                results["MPJPE"][cam][frame][mod]["priority2_mm"] = _compute_mpjpe(pred_joints, truth_joints, priority2_names)
+                
+                # PA-MPJPE
+                results["PA-MPJPE"][cam][frame].setdefault(mod, {})
+                results["PA-MPJPE"][cam][frame][mod]["priority1_mm"] = _compute_pa_mpjpe(pred_joints, truth_joints, priority1_names)
+                results["PA-MPJPE"][cam][frame][mod]["priority2_mm"] = _compute_pa_mpjpe(pred_joints, truth_joints, priority2_names)
+                
+                # PCK-mm
+                results["PCK"][cam][frame].setdefault(mod, {})
+                results["PCK"][cam][frame][mod]["priority1_mm"] = _compute_pck_mm(pred_joints, truth_joints, priority1_names)
+                results["PCK"][cam][frame][mod]["priority2_mm"] = _compute_pck_mm(pred_joints, truth_joints, priority2_names)
+
+    header = ["Frame"]
+    for mod in MODULES:
+        header.append(f"{mod}_priority1_mm")
+        header.append(f"{mod}_priority2_mm")
+
+    for metric in ["MPJPE", "PA-MPJPE", "PCK"]:
+        for cam in CAMERAS:
+            filename = f"{metric}_{CAMERA_FILE_NAMES[cam]}.csv"
+            out_file = out_dir / filename
+            with out_file.open("w", newline="", encoding="utf-8") as f:
+                f.write("sep=,\n")
+                writer = csv.writer(f)
+                writer.writerow(header)
+                
+                avg_sums = {h: 0.0 for h in header[1:]}
+                
+                for frame in frames:
+                    row = [frame]
+                    for mod in MODULES:
+                        v1 = results[metric][cam][frame][mod]["priority1_mm"]
+                        v2 = results[metric][cam][frame][mod]["priority2_mm"]
+                        row.append(f"{v1:.2f}")
+                        row.append(f"{v2:.2f}")
+                        avg_sums[f"{mod}_priority1_mm"] += v1
+                        avg_sums[f"{mod}_priority2_mm"] += v2
+                    writer.writerow(row)
+                
+                n_frames = len(frames)
+                avg_row = ["AVERAGE"]
+                for h in header[1:]:
+                    avg_row.append(f"{(avg_sums[h]/n_frames):.2f}")
+                writer.writerow(avg_row)
+
+    log_done(str(out_dir))

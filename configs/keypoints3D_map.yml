@@ -1,0 +1,103 @@
+keypoints:
+  - name: head
+    regressor_index: 0
+  - name: neck
+    regressor_index: 1
+  - name: right_shoulder
+    regressor_index: 2
+  - name: right_elbow
+    regressor_index: 3
+  - name: right_wrist
+    regressor_index: 4
+  - name: left_shoulder
+    regressor_index: 5
+  - name: left_elbow
+    regressor_index: 6
+  - name: left_wrist
+    regressor_index: 7
+  - name: pelvis
+    regressor_index: 8
+  - name: right_hip
+    regressor_index: 9
+  - name: right_knee
+    regressor_index: 10
+  - name: right_ankle
+    regressor_index: 11
+  - name: left_hip
+    regressor_index: 12
+  - name: left_knee
+    regressor_index: 13
+  - name: left_ankle
+    regressor_index: 14
+  - name: left_toe
+    regressor_index: 19
+  - name: left_foot
+    regressor_index: 20
+  - name: right_toe
+    regressor_index: 22
+  - name: right_foot
+    regressor_index: 23
+  - name: left_hand
+    regressor_index: 25
+  - name: right_hand
+    regressor_index: 26
+
+priority1:
+  - head
+  - right_shoulder
+  - right_elbow
+  - right_wrist
+  - left_shoulder
+  - left_elbow
+  - left_wrist
+  - right_hip
+  - right_knee
+  - right_ankle
+  - left_hip
+  - left_knee
+  - left_ankle
+
+priority2:
+  - head
+  - neck
+  - right_shoulder
+  - right_elbow
+  - right_wrist
+  - left_shoulder
+  - left_elbow
+  - left_wrist
+  - pelvis
+  - right_hip
+  - right_knee
+  - right_ankle
+  - left_hip
+  - left_knee
+  - left_ankle
+  - left_toe
+  - left_foot
+  - right_toe
+  - right_foot
+  - left_hand
+  - right_hand
+
+skeleton:
+  - [head, neck]
+  - [neck, right_shoulder]
+  - [neck, left_shoulder]
+  - [neck, pelvis]
+  - [right_shoulder, right_elbow]
+  - [right_elbow, right_wrist]
+  - [right_wrist, right_hand]
+  - [left_shoulder, left_elbow]
+  - [left_elbow, left_wrist]
+  - [left_wrist, left_hand]
+  - [pelvis, right_hip]
+  - [right_hip, right_knee]
+  - [right_knee, right_ankle]
+  - [right_ankle, right_toe]
+  - [right_ankle, right_foot]
+  - [pelvis, left_hip]
+  - [left_hip, left_knee]
+  - [left_knee, left_ankle]
+  - [left_ankle, left_toe]
+  - [left_ankle, left_foot]

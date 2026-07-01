@@ -51,6 +51,38 @@ def slice_person_frames(person_data, start, frame_count):
     return out
 
 
+def _resolve_tracking_frame_ids(person_data):
+    tracking = person_data.get("tracking_results_for_reproj")
+    if not isinstance(tracking, dict) or "frame_id" not in tracking:
+        return None
+
+    frame_ids = np.asarray(tracking["frame_id"]).astype(int).reshape(-1)
+    total_frames = int(np.asarray(person_data["pose"]).shape[0])
+    if frame_ids.shape[0] != total_frames:
+        print(
+            "[Pose] Tracking frame_id length mismatch with pose frames: "
+            f"{frame_ids.shape[0]} vs {total_frames}. Falling back to sequential indices."
+        )
+        return None
+    return frame_ids.tolist()
+
+
+def _resolve_selected_frame_window(config: dict, synced_total_frames: int) -> tuple[int, int]:
+    runtime_cfg = config.get("runtime", {})
+    preprocess_cfg = config.get("preprocess", {})
+
+    start_frame = runtime_cfg.get("selected_frame_start", preprocess_cfg.get("start_frame"))
+    end_frame = runtime_cfg.get("selected_frame_end", preprocess_cfg.get("end_frame"))
+
+    selected_start = 1 if start_frame in (None, "") else max(1, int(start_frame))
+    selected_end = synced_total_frames if end_frame in (None, "") else min(synced_total_frames, int(end_frame))
+    if selected_end < selected_start:
+        raise ValueError(
+            f"Invalid preprocess frame range for pose export: start_frame={selected_start}, end_frame={selected_end}, synced_total_frames={synced_total_frames}"
+        )
+    return selected_start, selected_end
+
+
 def _clean_pose_output(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     for old_json in output_dir.glob("pose_data_*.json"):
@@ -88,46 +120,58 @@ def run_pose_export(config: dict) -> None:
     cam1_data = load_pkl_data(cam1_file)
     print(f"[Pose] Loading camera 2: {cam2_file}")
     cam2_data = load_pkl_data(cam2_file)
+    cam1_tracking_frame_ids = _resolve_tracking_frame_ids(cam1_data)
+    cam2_tracking_frame_ids = _resolve_tracking_frame_ids(cam2_data)
 
     offset, method, _ = resolve_selected_offset_from_camera_profile(config)
     cam1_start = max(0, -offset)
     cam2_start = max(0, offset)
-    min_frames = max(0, min(len(cam1_data["pose"]) - cam1_start, len(cam2_data["pose"]) - cam2_start))
+    synced_total_frames = max(0, min(len(cam1_data["pose"]) - cam1_start, len(cam2_data["pose"]) - cam2_start))
+
+    selected_start, selected_end = _resolve_selected_frame_window(config, synced_total_frames)
+    min_frames = max(0, selected_end - selected_start + 1)
+    cam1_start = cam1_start + selected_start - 1
+    cam2_start = cam2_start + selected_start - 1
     sync_result = {
         "offset": offset,
         "left_start": cam1_start,
         "right_start": cam2_start,
         "frame_count": min_frames,
         "method": method,
+        "selected_frame_range": [selected_start, selected_end],
     }
 
     print(f"[Pose] Cam1 frames: {len(cam1_data['pose'])}")
     print(f"[Pose] Cam2 frames: {len(cam2_data['pose'])}")
+    print(f"[Pose] Selected frame window: {selected_start}..{selected_end} ({min_frames} frames)")
     log_using_offset(offset=offset, method=method)
     print(f"[Pose] Exporting {min_frames} pose JSON files...")
+
+    j_regressor_path = paths.get("j_regressor_3d", "models/J_regressor_body25_plus_palm27.npy")
 
     cam1_export_data = slice_person_frames(cam1_data, cam1_start, min_frames)
     cam2_export_data = slice_person_frames(cam2_data, cam2_start, min_frames)
 
     for i in range(min_frames):
+        out_frame_id = selected_start + i
         keypoints3d_data = {
-            "camera1": get_3d_joints_for_frame(model, cam1_export_data, i),
-            "camera2": get_3d_joints_for_frame(model, cam2_export_data, i),
+            "camera1": get_3d_joints_for_frame(model, cam1_export_data, i, j_regressor_path, paths["keypoints3d_map"]),
+            "camera2": get_3d_joints_for_frame(model, cam2_export_data, i, j_regressor_path, paths["keypoints3d_map"]),
         }
         metadata_data = {
             "metadata": {
                 "camera_sync": sync_result,
                 "source_frame_indices": {
-                    "camera1": cam1_start + i,
-                    "camera2": cam2_start + i,
+                    "camera1": int(cam1_tracking_frame_ids[cam1_start + i]) if cam1_tracking_frame_ids is not None else cam1_start + i,
+                    "camera2": int(cam2_tracking_frame_ids[cam2_start + i]) if cam2_tracking_frame_ids is not None else cam2_start + i,
                 },
             }
         }
-        keypoints_path = output_dir / "keypoints3d" / f"pose_data_{i + 1}.json"
-        metadata_path = output_dir / "metadata" / f"pose_data_{i + 1}.json"
+        keypoints_path = output_dir / "keypoints3d" / f"pose_data_{out_frame_id}.json"
+        metadata_path = output_dir / "metadata" / f"pose_data_{out_frame_id}.json"
         write_json(keypoints_path, keypoints3d_data)
         write_json(metadata_path, metadata_data)
         if (i + 1) % 50 == 0 or (i + 1) == min_frames:
-            print(f"[Pose] Saved pose_data_{i + 1}.json ({i + 1}/{min_frames})")
+            print(f"[Pose] Saved pose_data_{out_frame_id}.json ({i + 1}/{min_frames})")
 
     log_done(str(output_dir))

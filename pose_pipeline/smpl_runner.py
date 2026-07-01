@@ -2,9 +2,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import smplx
-from keypoints_map import get_smpl_joint_map
-
-SMPL_JOINT_MAP = get_smpl_joint_map()
+from keypoints_map import load_keypoints3d_map
 
 
 def create_smpl_model(model_path):
@@ -21,7 +19,7 @@ def create_smpl_model(model_path):
     ).eval()
 
 
-def get_3d_joints_for_frame(model, person_data, frame_idx):
+def get_3d_joints_for_frame(model, person_data, frame_idx, regressor_path, map_path):
     pose = person_data["pose"][frame_idx:frame_idx + 1]
     trans = person_data["trans"][frame_idx:frame_idx + 1]
     betas = person_data["betas"]
@@ -39,9 +37,16 @@ def get_3d_joints_for_frame(model, person_data, frame_idx):
             transl=curr_trans_t,
         )
 
-    joints_3d = output.joints[0].cpu().numpy()
+    vertices = output.vertices[0].cpu().numpy()
+    j_reg = np.load(regressor_path)
+    if j_reg.shape != (27, 6890):
+        raise ValueError(f"Expected (27, 6890), got {j_reg.shape}")
+        
+    joints_all = j_reg @ vertices
+    
+    map_data = load_keypoints3d_map(map_path)
     result = {}
-    for joint_name, joint_idx in SMPL_JOINT_MAP.items():
-        x, y, z = joints_3d[joint_idx]
-        result[joint_name] = [round(float(x), 5), round(float(y), 5), round(float(z), 5)]
+    for kp in map_data["keypoints"]:
+        x, y, z = joints_all[kp["regressor_index"]]
+        result[kp["name"]] = [round(float(x), 5), round(float(y), 5), round(float(z), 5)]
     return result

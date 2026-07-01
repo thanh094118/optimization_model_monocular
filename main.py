@@ -13,10 +13,12 @@ def parse_args():
         default=None,
         choices=[
             "all",
+            "all_vis",
             "preprocess",
             "pose",
             "fusion",
             "learnable",
+            "optimization",
             "visualization",
             "evaluation",
             "refinement",
