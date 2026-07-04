@@ -12,16 +12,8 @@ def parse_args():
         "--stage",
         default=None,
         choices=[
-            "all",
-            "all_vis",
-            "preprocess",
-            "pose",
-            "fusion",
-            "learnable",
-            "optimization",
             "visualization",
             "evaluation",
-            "refinement",
         ],
         help="Override runtime.stage in YAML",
     )
@@ -35,10 +27,7 @@ def main():
     args = parse_args()
     config = load_config(args.config)
 
-    if args.stage:
-        config["runtime"]["stage"] = args.stage
-
-    run_pipeline(config)
+    run_pipeline(config, stage_override=args.stage)
 
 
 if __name__ == "__main__":

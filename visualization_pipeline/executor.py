@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Visualization phase: compare Fusion optimized pose, source video, and Learnable-SMPLify output."""
+"""Visualization phase: compare fusion, source video, and Learnable-SMPLify output."""
 from __future__ import annotations
 
 import glob
@@ -14,8 +14,8 @@ from typing import Dict
 import cv2
 import matplotlib
 import numpy as np
-from visualization_pipeline.logs import log_disabled, log_done, log_header
 from preprocess_pipeline.calib import resolve_selected_intrinsics
+from config_loader import resolve_inputs
 
 # Use non-interactive backend so the phase works from normal Python CLI.
 matplotlib.use("Agg")
@@ -51,9 +51,6 @@ EVALUATION_MODULE_ALIASES = {
     "pose": "posed",
     "fusion": "fused",
     "learnable": "learnable",
-    "optimized": "optimized",
-    "fusion_debug1": "fused",
-    "fusion_debug2": "fused",
 }
 
 CAMERAS = ("camera1", "camera2")
@@ -134,31 +131,6 @@ def load_learnable_from_dir(learnable_dir: Path) -> list[dict]:
     return results
 
 
-def load_optimized_poses(optimized_dir: Path) -> list[dict]:
-    """Load final optimized poses from optimized_data_*.json files."""
-    if not optimized_dir.exists():
-        return []
-
-    keypoints_dir = optimized_dir / "keypoints3d"
-    if not keypoints_dir.exists():
-        return []
-
-    file_paths = sorted(keypoints_dir.glob("optimized_data_*.json"), key=_frame_index)
-    results = []
-    for path in file_paths:
-        with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        data["frame_id"] = _frame_index(path)
-        results.append({
-            "camera1": data.get("camera1", {}),
-            "camera2": data.get("camera2", {}),
-            "frame_id": data["frame_id"],
-        })
-
-    print(f"[Visualization] Loaded {len(results)} optimized frames from {optimized_dir}")
-    return results
-
-
 def _resolve_video_path(path_value):
     if not path_value:
         return None
@@ -169,11 +141,11 @@ def _resolve_video_path(path_value):
 def get_video_map(config: dict) -> dict[str, str]:
     """Resolve camera videos from YAML. If omitted, fallback to MP4 files in video_search_dir/current dir."""
     vis_cfg = config.get("visualization", {})
-    paths_cfg = config.get("paths", {})
+    inputs = resolve_inputs(config)
 
     video_map = {}
-    cam1_video = _resolve_video_path(paths_cfg.get("camera1_video"))
-    cam2_video = _resolve_video_path(paths_cfg.get("camera2_video"))
+    cam1_video = _resolve_video_path(inputs.get("camera1_video"))
+    cam2_video = _resolve_video_path(inputs.get("camera2_video"))
 
     if cam1_video:
         video_map["camera1"] = cam1_video
@@ -318,7 +290,7 @@ def _load_camera_keypoints_by_frame(directory: Path, pattern: str, camera_name: 
     for p in files:
         with p.open("r", encoding="utf-8") as f:
             data = json.load(f)
-        cam_data = data.get("optimized", {}).get(camera_name) if "optimized" in data else data.get(camera_name)
+        cam_data = data.get(camera_name)
         if isinstance(cam_data, dict):
             frame_to_kp[_frame_index(p)] = {_normalize_key(k): v for k, v in cam_data.items()}
     return frame_to_kp
@@ -341,7 +313,7 @@ def _resolve_image_dir(paths: dict, camera_name: str) -> Path:
     raise FileNotFoundError(f"Cannot find image folder for {camera_name}. Tried: {candidates}")
 
 
-def _load_priority1_metric_frame_map(csv_path: Path) -> Dict[int, Dict[str, float]]:
+def _load_priority_metric_frame_map(csv_path: Path, priority_suffix: str) -> Dict[int, Dict[str, float]]:
     frame_to_val: Dict[int, Dict[str, float]] = {}
     if not csv_path.exists():
         return frame_to_val
@@ -362,10 +334,11 @@ def _load_priority1_metric_frame_map(csv_path: Path) -> Dict[int, Dict[str, floa
                 header_seen = True
                 for idx, column in enumerate(row[1:], start=1):
                     column = column.strip()
-                    if column.endswith("_priority1_mm"):
-                        module_cols[column[: -len("_priority1_mm")]] = idx
+                    suffix = f"_{priority_suffix}_mm"
+                    if column.endswith(suffix):
+                        module_cols[column[: -len(suffix)]] = idx
                 if not module_cols:
-                    raise ValueError(f"No *_priority1_mm columns found in evaluation CSV: {csv_path}")
+                    raise ValueError(f"No *_{priority_suffix}_mm columns found in evaluation CSV: {csv_path}")
                 continue
             if first == "average":
                 continue
@@ -381,7 +354,7 @@ def _load_priority1_metric_frame_map(csv_path: Path) -> Dict[int, Dict[str, floa
     return frame_to_val
 
 
-def _build_priority1_metric_maps(paths: dict, metric_name: str = "PA-MPJPE") -> Dict[str, Dict[str, Dict[int, float]]]:
+def _build_priority_metric_maps(paths: dict, metric_name: str = "PA-MPJPE", priority_suffix: str = "priority1") -> Dict[str, Dict[str, Dict[int, float]]]:
     out: Dict[str, Dict[str, Dict[int, float]]] = {}
     eval_dir = Path(paths.get("evaluation_output_dir", "output/evaluation_results"))
     if not eval_dir.exists():
@@ -390,7 +363,7 @@ def _build_priority1_metric_maps(paths: dict, metric_name: str = "PA-MPJPE") -> 
     for cam in CAMERAS:
         cam_tag = "cam1" if cam == "camera1" else "cam2"
         csv_path = eval_dir / f"{metric_name}_{cam_tag}.csv"
-        frame_to_values = _load_priority1_metric_frame_map(csv_path)
+        frame_to_values = _load_priority_metric_frame_map(csv_path, priority_suffix)
         for frame_id, module_values in frame_to_values.items():
             for module_name, value in module_values.items():
                 out.setdefault(module_name, {}).setdefault(cam, {})[frame_id] = value
@@ -417,32 +390,6 @@ def _project_module_specs(paths: dict, camera_name: str) -> list[dict]:
             "frames": _load_camera_keypoints_by_frame(Path(paths["learnable_output_dir"]) / "keypoints3d", "learnable_frame_*.json", camera_name),
         },
     ]
-    
-    optimized_dir = Path(paths.get("optimized_output_dir", "output/optimized_results"))
-    if optimized_dir.exists():
-        opt_frames = _load_camera_keypoints_by_frame(optimized_dir / "keypoints3d", "optimized_data_*.json", camera_name)
-        if opt_frames:
-            specs.append({
-                "name": "optimized",
-                "title": "Optimized 3D->2D",
-                "frames": opt_frames,
-            })
-    return specs
-
-
-def _debug_project_module_specs(paths: dict, camera_name: str) -> list[dict]:
-    fused_dir = Path(paths["fused_output_dir"])
-    specs = []
-    for debug_name, title in (("debug1", "Fusion Debug1 3D->2D"), ("debug2", "Fusion Debug2 3D->2D")):
-        debug_dir = fused_dir / debug_name
-        if debug_dir.exists():
-            frame_map = _load_camera_keypoints_by_frame(debug_dir, "fused_data_*.json", camera_name)
-            if frame_map:
-                specs.append({
-                    "name": f"fusion_{debug_name}",
-                    "title": title,
-                    "frames": frame_map,
-                })
     return specs
 
 
@@ -475,7 +422,8 @@ def _create_project2d_animation_for_specs(camera_name: str, config: dict, paths:
     n_cols = len(module_specs)
     fig = plt.figure(figsize=(8 * n_cols, 8))
     axes = [fig.add_subplot(1, n_cols, i + 1) for i in range(n_cols)]
-    pa_mpjpe_priority1_maps = _build_priority1_metric_maps(paths, metric_name="PA-MPJPE")
+    pa_mpjpe_priority1_maps = _build_priority_metric_maps(paths, metric_name="PA-MPJPE", priority_suffix="priority1")
+    pa_mpjpe_priority2_maps = _build_priority_metric_maps(paths, metric_name="PA-MPJPE", priority_suffix="priority2")
 
     def draw_overlay(img_bgr, joints):
         out = img_bgr.copy()
@@ -502,8 +450,10 @@ def _create_project2d_animation_for_specs(camera_name: str, config: dict, paths:
             ax.imshow(draw_overlay(base, data_map[frame_id]))
             eval_module_name = EVALUATION_MODULE_ALIASES.get(module_name, module_name)
             priority1_v = pa_mpjpe_priority1_maps.get(eval_module_name, {}).get(camera_name, {}).get(frame_id, float("nan"))
+            priority2_v = pa_mpjpe_priority2_maps.get(eval_module_name, {}).get(camera_name, {}).get(frame_id, float("nan"))
             priority1_txt = f"{priority1_v:.2f}" if np.isfinite(priority1_v) else "N/A"
-            metric_line = f"PA-MPJPE | priority1: {priority1_txt} mm"
+            priority2_txt = f"{priority2_v:.2f}" if np.isfinite(priority2_v) else "N/A"
+            metric_line = f"PA-MPJPE | p1: {priority1_txt} mm | p2: {priority2_txt} mm"
             ax.set_title(f"{title} | {camera_name} | Frame {frame_id}\n{metric_line}", fontsize=11)
             ax.axis("off")
 
@@ -526,23 +476,10 @@ def create_project2d_animation(camera_name: str, config: dict, paths: dict, outp
     )
 
 
-def create_debug_project2d_animation(camera_name: str, config: dict, paths: dict, output_video: Path, target_fps: int, dpi: int = 100) -> None:
-    _create_project2d_animation_for_specs(
-        camera_name=camera_name,
-        config=config,
-        paths=paths,
-        output_video=output_video,
-        target_fps=target_fps,
-        module_specs=_debug_project_module_specs(paths, camera_name),
-        dpi=dpi,
-    )
-
-
 def create_comparison_animation(
     camera_name: str,
     fusion_poses,
     learnable_poses,
-    optimized_poses,
     frame_ids,
     paths: dict,
     video_map: dict[str, str],
@@ -551,7 +488,7 @@ def create_comparison_animation(
     target_fps: int,
     dpi: int = 100,
 ) -> None:
-    """Create 4-column animation: Fusion | Video | Learnable | Optimized."""
+    """Create 3-column animation: Fusion | Video | Learnable."""
     image_dir = _resolve_image_dir(paths, camera_name)
     image_map = {_frame_index(p): p for p in sorted(image_dir.glob("images_frame_*.jpg"), key=_frame_index)}
     if not image_map:
@@ -563,17 +500,15 @@ def create_comparison_animation(
         print(f"[Visualization] No video or extracted frame sequence for {camera_name}. Video column will be blank.")
 
     frame_interval = 1000 / max(target_fps, 1)
-    fig = plt.figure(figsize=(32, 8))
-    ax_fuse = fig.add_subplot(141, projection="3d")
-    ax_vid = fig.add_subplot(142)
-    ax_learn = fig.add_subplot(143, projection="3d")
-    ax_opt = fig.add_subplot(144, projection="3d")
+    fig = plt.figure(figsize=(24, 8))
+    ax_fuse = fig.add_subplot(131, projection="3d")
+    ax_vid = fig.add_subplot(132)
+    ax_learn = fig.add_subplot(133, projection="3d")
 
     def update(frame_idx):
         ax_fuse.cla()
         ax_vid.cla()
         ax_learn.cla()
-        ax_opt.cla()
         frame_id = frame_ids[frame_idx]
 
         fuse_points = []
@@ -605,18 +540,11 @@ def create_comparison_animation(
             learn_points = plot_skeleton_safe(ax_learn, learn_pose, "tab:blue", f"{camera_name} learnable")
         setup_axis(ax_learn, f"Learnable {camera_name} - Frame {frame_id}")
 
-        opt_points = []
-        if frame_idx < len(optimized_poses):
-            opt_pose = optimized_poses[frame_idx].get(camera_name)
-            opt_points = plot_skeleton_safe(ax_opt, opt_pose, "tab:green", f"{camera_name} optimized")
-        setup_axis(ax_opt, f"Optimized {camera_name} - Frame {frame_id}")
-
-        combined = fuse_points + learn_points + opt_points
+        combined = fuse_points + learn_points
         set_auto_axes(ax_fuse, combined)
         set_auto_axes(ax_learn, combined)
-        set_auto_axes(ax_opt, combined)
 
-        for ax in (ax_fuse, ax_learn, ax_opt):
+        for ax in (ax_fuse, ax_learn):
             handles, labels = ax.get_legend_handles_labels()
             if handles:
                 ax.legend(loc="upper left")
@@ -638,12 +566,11 @@ def run_visualization(config: dict) -> None:
     vis_cfg = config.get("visualization", {})
 
     if not vis_cfg.get("enabled", True):
-        log_disabled()
+        print("[Visualization] Disabled by config: visualization.enabled=false")
         return
 
     fused_dir = Path(paths["fused_output_dir"])
     learnable_dir = Path(paths["learnable_output_dir"])
-    optimized_dir = Path(paths.get("optimized_output_dir", "output/optimized_results"))
     output_dir = Path(paths.get("visualization_output_dir", "output/visualization"))
 
     if runtime_cfg.get("clean_output", True):
@@ -651,15 +578,12 @@ def run_visualization(config: dict) -> None:
     else:
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    log_header()
+    print("[Visualization] Fusion vs Video vs Learnable")
 
     fusion_poses = load_fusion_poses(fused_dir)
     learnable_poses = load_learnable_from_dir(learnable_dir)
-    optimized_poses = load_optimized_poses(optimized_dir)
     
     frame_count = min(len(fusion_poses), len(learnable_poses))
-    if optimized_poses:
-        frame_count = min(frame_count, len(optimized_poses))
 
     if frame_count == 0:
         raise ValueError("No frames to visualize. Check fused_jsons and learnable_results.")
@@ -670,7 +594,6 @@ def run_visualization(config: dict) -> None:
 
     fusion_poses = fusion_poses[:frame_count]
     learnable_poses = learnable_poses[:frame_count]
-    optimized_poses = optimized_poses[:frame_count] if optimized_poses else []
     frame_ids = [frame.get("frame_id", idx + 1) for idx, frame in enumerate(fusion_poses)]
 
     target_fps = int(vis_cfg.get("target_fps", 10))
@@ -681,19 +604,17 @@ def run_visualization(config: dict) -> None:
 
     print(f"[Visualization] Fusion frames: {len(fusion_poses)}")
     print(f"[Visualization] Learnable frames: {len(learnable_poses)}")
-    print(f"[Visualization] Optimized frames: {len(optimized_poses)}")
     print(f"[Visualization] Rendering frames: {frame_count}")
     print(f"[Visualization] FPS: {target_fps}")
     print(f"[Visualization] Output dir: {output_dir}")
 
     for camera_name in cameras:
         print(f"[Visualization] Processing {camera_name}")
-        output_video = output_dir / f"compare_{camera_name}_fuse_vid_learn_opt_{timestamp}.mp4"
+        output_video = output_dir / f"compare_{camera_name}_fusion_video_learnable_{timestamp}.mp4"
         create_comparison_animation(
             camera_name=camera_name,
             fusion_poses=fusion_poses,
             learnable_poses=learnable_poses,
-            optimized_poses=optimized_poses,
             frame_ids=frame_ids,
             paths=paths,
             video_map=video_map,
@@ -704,7 +625,7 @@ def run_visualization(config: dict) -> None:
         )
 
     for camera_name in cameras:
-        output_video = output_dir / f"project_{camera_name}_optimized_learnable_{timestamp}.mp4"
+        output_video = output_dir / f"project_{camera_name}_pose_fusion_learnable_{timestamp}.mp4"
         create_project2d_animation(
             camera_name=camera_name,
             config=config,
@@ -713,17 +634,5 @@ def run_visualization(config: dict) -> None:
             target_fps=target_fps,
             dpi=dpi,
         )
-        debug_specs = _debug_project_module_specs(paths, camera_name)
-        if debug_specs:
-            debug_modules = "_".join(spec["name"] for spec in debug_specs)
-            debug_output_video = output_dir / f"project_{camera_name}_{debug_modules}_{timestamp}.mp4"
-            create_debug_project2d_animation(
-                camera_name=camera_name,
-                config=config,
-                paths=paths,
-                output_video=debug_output_video,
-                target_fps=target_fps,
-                dpi=dpi,
-            )
 
-    log_done(str(output_dir))
+    print(f"[Visualization] Done. Output: {output_dir}")

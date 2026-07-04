@@ -1,18 +1,20 @@
 runtime:
-  stage: all
+  stage: visualization
   clean_output: true
-  verbose: true
 
 preprocess:
-  input_dir: "input/tt/S3/Seq1/imageSequence"
   output_dir: "output/preprocess_results"
-  start_frame: null
-  end_frame: null #null
+  offset_estimation:
+    max_frames: null
+
+inputs:
+  cam1_pkl: "input/testcase4/wham_opencap_1.pkl"
+  cam2_pkl: "input/testcase4/wham_opencap_2.pkl"
+  camera1_video: "input/testcase4/video_1.mp4"
+  camera2_video: "input/testcase4/video_2.mp4"
+  ground_truth_dir: "input/testcase4/gtruth_results"
 
 paths:
-  cam1_pkl: "input/tt/S3/Seq1/video_2/wham_opencap.pkl"
-  cam2_pkl: "input/tt/S3/Seq1/video_8/wham_opencap.pkl"
-
   smpl_model: "models/SMPL_NEUTRAL.pkl"
   segmentation: "models/smpl_partSegmentation_mapping.pkl"
   keypoints3d_map: "configs/keypoints3D_map.yml"
@@ -23,17 +25,8 @@ paths:
   pose_output_dir: "output/pose_results"
   fused_output_dir: "output/fused_results"
   learnable_output_dir: "output/learnable_results"
-  optimized_output_dir: "output/optimized_results"
   visualization_output_dir: "output/visualize_results"
   evaluation_output_dir: "output/evaluation_results"
-  refinement_output_dir: "output/refinement_results"
-  gmm_prior: "models/gmm_08.pkl"
-
-  debug1_dir: "output/debug1"
-  debug2_dir: "output/debug2"
-
-  camera1_video: "input/tt/S3/Seq1/imageSequence/video_2.avi"
-  camera2_video: "input/tt/S3/Seq1/imageSequence/video_8.avi"
 
 pose_export:
   enabled: true
@@ -59,91 +52,9 @@ fusion:
     temporal_lambda: 2.0
     max_iter: 1000
 
-  debug:
-    save_debug1: false
-    save_debug2: false
-
 learnable:
   enabled: true
   checkpoint: "models/best_ckpt.pth.tar"
-  # lr: 0.03
-  # iterations: 80
-  # pose_prior_weight: 0.05
-  # trans_prior_weight: 0.05
-
-optimization:
-  enabled: true
-  device: auto
-  model:
-    model_type: smpl
-    gender: neutral
-    use_pca: false
-    flat_hand_mean: true
-  phase2:
-    joint_indices: [0, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14]
-    min_conf_sum: 6.5
-  phase3:
-    window_size: 2
-  phase5:
-    chunk_size: 256
-    chunk_stride: 256
-    optimizer: &lbfgs_optimizer
-      optim_type: lbfgs
-      lr: 1.0
-      max_iter: 8
-      max_outer_steps: 30
-      line_search_fn: null
-      tolerance_grad: 1.0e-7
-      tolerance_change: 1.0e-7
-      relative_tolerance: 1.0e-5
-    reprojection:
-      weight: 100.0
-      joint_indices:
-        [
-          0,
-          1,
-          2,
-          3,
-          4,
-          5,
-          6,
-          7,
-          8,
-          9,
-          10,
-          11,
-          12,
-          13,
-          14,
-          19,
-          20,
-          22,
-          23,
-          25,
-          26,
-        ]
-    smooth:
-      weight: 1.0
-      window_weight: [0.5, 0.3, 0.1, 0.1]
-      linear_weight: 100.0
-      depth_weight: 1000.0
-      order: 2
-  phase6:
-    repeat: 1
-    optimizer: *lbfgs_optimizer
-    reprojection:
-      weight: 100.0
-      gm_rho: 0.02
-    smooth:
-      weight: 1.0
-      window_weight: [0.5, 0.3, 0.1, 0.1]
-      th_linear_weight: 100.0
-      th_depth_weight: 1000.0
-      rh_weight: 1.0
-      order: 2
-  cameras:
-    - camera1
-    - camera2
 
 visualization:
   enabled: true
@@ -155,28 +66,10 @@ visualization:
     - camera1
     - camera2
 
-refinement:
-  enabled: false
-
-  data_dir: "input"
-  wham_file: "wham_opencap_1.pkl"
-  video: "input/video_1.mp4"
-  intrinsics: "input/cameraIntrinsics.pickle"
-  subject_params: "input/subject_params.txt"
-  parameters_yaml: "configs/parameters.yaml"
-
-  activity: null
-  rotation: 0
-
-  use_gpu: true
-  static_cam: true
-  n_iter_opt2: 75
-  filter_freq: 6
-  smoothness_diff_n: 1
-  print_loss_terms: false
-  save_smpl_for_viz: true
-
 evaluation:
   enabled: true
-  ground_truth_dir: "input/tt/frames_json/s3_seq1"
   testcase_name: null
+  metrics:
+    pa_mpjpe: true
+    mpjpe: false
+    pck: false

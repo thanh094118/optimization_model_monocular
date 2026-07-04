@@ -20,8 +20,16 @@ else
     ffmpeg -version | head -n 1
 fi
 
+echo "Kiểm tra gdown..."
+if ! command -v gdown >/dev/null 2>&1; then
+    echo "Chưa có gdown. Đang cài gdown..."
+    python -m pip install gdown
+else
+    gdown --version
+fi
+
 echo "Kiểm tra import packages..."
-python - <<EOF
+python - <<'EOF'
 import numpy
 import torch
 import smplx
@@ -34,6 +42,7 @@ import loguru
 import decouple
 import kornia
 import slahmr
+
 print("Import OK")
 EOF
 
@@ -44,33 +53,42 @@ echo "========================================"
 echo "2. TẢI VÀ CHUẨN BỊ DỮ LIỆU"
 echo "========================================"
 
-declare -A FILE_IDS=(
-    ["models/SMPL_NEUTRAL.pkl"]="1rg2QnvmMgoS7Cpok3X0RIie3ZVwW_c0U"
-    ["models/J_regressor_body25.npy"]="1SCsg3XuDEMkCyVO4s6p23Mj-R-7su9uQ"
-    ["models/best_ckpt.pth.tar"]="1PlrsPWJvH6KaUOGFoWYc_24vsbJd1PZA"
-    ["models/smpl_partSegmentation_mapping.pkl"]="1P6h-MOdTvb5q4EPntJmsEQwNurut6u2I"    
-    ["input/cameraIntrinsics.pickle"]="1Lhg4qY8GEg4V6ZE8nK4rD7mP4PAbE9DS"
-    ["input/wham_opencap_1.pkl"]="12xU0FGZpFaWOcQ6JKHUqyJdQClL4I1of"
-    ["input/wham_opencap_2.pkl"]="1xfVxIVfp6A1D8q3YXca8_CAFzgxtBgyY"
-    ["input/video_1.mp4"]="1a02Vv976w-7bLpZAj__NdTOGwtmDL_NL"
-    ["input/video_2.mp4"]="1quUAbCczwASRbnx2HqNIDFusosfu4wA1"
+declare -A FOLDER_URLS=(
+    ["models"]="https://drive.google.com/drive/folders/1vlVOnUQDhjYXL5w1izqPAH-zPot_yUxq?usp=sharing"
+    ["input"]="https://drive.google.com/drive/folders/1BzMRVjwshaqjOouKGx-ktW6zNNbnGByQ?usp=sharing"
 )
 
-download_file() {
-    local filename=$1
-    local file_id=$2
+download_folder() {
+    local folder="$1"
+    local folder_url="$2"
+    local marker_file="${folder}/.download_complete"
 
-    if [ ! -f "$filename" ]; then
-        echo "Đang tải $filename ..."
-        mkdir -p "$(dirname "$filename")"
-        gdown "https://drive.google.com/uc?id=${file_id}" -O "$filename"
-    else
-        echo "$filename đã tồn tại, bỏ qua."
+    if [ -f "$marker_file" ]; then
+        echo "Folder $folder đã được tải trước đó, bỏ qua."
+        return
     fi
+
+    echo "Đang tải folder: $folder ..."
+    mkdir -p "$folder"
+
+    gdown --folder "$folder_url" -O "$folder" --remaining-ok
+
+    touch "$marker_file"
+
+    echo "Hoàn tất tải folder: $folder"
 }
 
-for filename in "${!FILE_IDS[@]}"; do
-    download_file "$filename" "${FILE_IDS[$filename]}"
+for folder in "${!FOLDER_URLS[@]}"; do
+    download_folder "$folder" "${FOLDER_URLS[$folder]}"
 done
 
+echo ""
+echo "========================================"
+echo "HOÀN TẤT"
+echo "========================================"
 echo "Hoàn tất tải dữ liệu và thiết lập dự án!"
+
+Chạy:
+
+chmod +x setup.sh
+./setup.sh

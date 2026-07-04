@@ -20,9 +20,6 @@ from fusion_pipeline.config import (
     TORSO_PART_IDS,
 )
 
-_FX = _FY = (OCCLUSION_IMAGE_WIDTH * OCCLUSION_IMAGE_WIDTH + OCCLUSION_IMAGE_HEIGHT * OCCLUSION_IMAGE_HEIGHT) ** 0.5
-_CX = OCCLUSION_IMAGE_WIDTH / 2.0
-_CY = OCCLUSION_IMAGE_HEIGHT / 2.0
 _TORSO_MASK = None
 
 
@@ -82,17 +79,29 @@ def load_torso_mask(seg_path):
     return _TORSO_MASK
 
 
-def _project_to_image(points_3d):
+def _intrinsics_to_params(intrinsics):
+    arr = np.asarray(intrinsics, dtype=float)
+    if arr.shape != (3, 3):
+        raise ValueError(f"Expected intrinsics shape (3, 3), got {arr.shape}")
+    fx = float(arr[0, 0])
+    fy = float(arr[1, 1])
+    cx = float(arr[0, 2])
+    cy = float(arr[1, 2])
+    return fx, fy, cx, cy
+
+
+def _project_to_image(points_3d, intrinsics):
+    fx, fy, cx, cy = _intrinsics_to_params(intrinsics)
     X, Y, Z = points_3d[:, 0], points_3d[:, 1], points_3d[:, 2]
     valid = Z > 1e-6
-    u = np.where(valid, _FX * (X / np.where(valid, Z, 1.0)) + _CX, np.nan)
-    v = np.where(valid, _FY * (Y / np.where(valid, Z, 1.0)) + _CY, np.nan)
+    u = np.where(valid, fx * (X / np.where(valid, Z, 1.0)) + cx, np.nan)
+    v = np.where(valid, fy * (Y / np.where(valid, Z, 1.0)) + cy, np.nan)
     return np.stack([u, v], axis=1)
 
 
-def _extract_torso_data(verts, torso_mask):
+def _extract_torso_data(verts, torso_mask, intrinsics):
     V_torso = verts[torso_mask]
-    uv = _project_to_image(V_torso)
+    uv = _project_to_image(V_torso, intrinsics)
     valid = ~np.isnan(uv).any(axis=1)
     all_torso_uv = uv[valid]
     all_torso_z = V_torso[valid, 2]
@@ -117,22 +126,23 @@ def _local_torso_z(u_k, v_k, all_torso_uv, all_torso_z):
     return float(all_torso_z[nn_idx].min())
 
 
-def compute_visibility_from_mesh_vertices(joints, verts, occlusion_tau=0.05):
+def compute_visibility_from_mesh_vertices(joints, verts, intrinsics, occlusion_tau=0.05):
     visibility = {name: True for name in joints.keys()}
     verts = np.asarray(verts, dtype=float)
     if _TORSO_MASK is None or len(verts) != 6890:
         return visibility
-    hull_2d_obj, all_torso_uv, all_torso_z = _extract_torso_data(verts, _TORSO_MASK)
+    hull_2d_obj, all_torso_uv, all_torso_z = _extract_torso_data(verts, _TORSO_MASK, intrinsics)
     if hull_2d_obj is None:
         return visibility
+    fx, fy, cx, cy = _intrinsics_to_params(intrinsics)
     for name, pos in joints.items():
         if name not in OCCLUSION_CHECK_JOINTS:
             continue
         kp_3d = as_xyz(pos)
         if kp_3d[2] <= 0:
             continue
-        u_k = _FX * (kp_3d[0] / kp_3d[2]) + _CX
-        v_k = _FY * (kp_3d[1] / kp_3d[2]) + _CY
+        u_k = fx * (kp_3d[0] / kp_3d[2]) + cx
+        v_k = fy * (kp_3d[1] / kp_3d[2]) + cy
         if not _point_in_hull2d(np.array([u_k, v_k]), hull_2d_obj):
             continue
         z_local = _local_torso_z(u_k, v_k, all_torso_uv, all_torso_z)

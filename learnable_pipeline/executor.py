@@ -26,10 +26,12 @@ except Exception:
             self[name] = value
 
 from keypoints_map import load_keypoints3d_map
-from learnable_pipeline.config import OUTPUT_SUBDIRS
-from learnable_pipeline.logs import log_disabled, log_done, log_header
 from learnable_pipeline.post_opt import post_optimize_smpl_sequence
 from json_io import write_json
+from config_loader import resolve_inputs
+
+LEARNABLE_FILE_PREFIX = "learnable_frame_"
+OUTPUT_SUBDIRS = ("keypoints3d", "metadata")
 
 BODY25_NAMES = (
     "nose", "neck", "right_shoulder", "right_elbow", "right_wrist", "left_shoulder",
@@ -420,27 +422,28 @@ def infer_learnable_temporal_from_fusion(
 
 def _metadata_for_frame(result: dict, frame_idx: int) -> dict:
     return {
-        "pose_init": np.asarray(result["pose_init"])[frame_idx].round(8).tolist(),
-        "pose_pred": np.asarray(result["pose_pred"])[frame_idx].round(8).tolist(),
-        "betas": np.asarray(result["betas"])[frame_idx].round(8).tolist(),
-        "trans_pred": np.asarray(result["trans_pred"])[frame_idx].round(8).tolist(),
+        "pose_init": np.asarray(result["pose_init"])[frame_idx].tolist(),
+        "pose_pred": np.asarray(result["pose_pred"])[frame_idx].tolist(),
+        "betas": np.asarray(result["betas"])[frame_idx].tolist(),
+        "trans_pred": np.asarray(result["trans_pred"])[frame_idx].tolist(),
         "initial_loss": result.get("initial_loss", 0.0),
         "final_loss": result.get("final_loss", 0.0),
     }
 
 def run_learnable_smplify(config: dict) -> None:
     paths = config["paths"]
+    inputs = resolve_inputs(config)
     runtime_cfg = config.get("runtime", {})
     learnable_cfg = copy.deepcopy(config.get("learnable_smplify") or config.get("learnable", {}))
 
     if not learnable_cfg.get("enabled", True):
-        log_disabled()
+        print("[Learnable] Disabled by config: learnable_smplify.enabled=false")
         return
 
     input_dir = Path(paths["fused_output_dir"])
     output_dir = Path(paths["learnable_output_dir"])
-    cam1_pkl = Path(paths["cam1_pkl"])
-    cam2_pkl = Path(paths["cam2_pkl"])
+    cam1_pkl = Path(inputs["cam1_pkl"])
+    cam2_pkl = Path(inputs["cam2_pkl"])
 
     j_regressor_3d_path = paths.get("j_regressor_3d", "models/J_regressor_body25_plus_palm27.npy")
 
@@ -469,7 +472,7 @@ def run_learnable_smplify(config: dict) -> None:
         device_name = "cpu"
     device = torch.device(device_name)
 
-    log_header()
+    print("[Learnable] Learnable-SMPLify after judgement/fusion")
     judgement_results = load_fused_results(input_dir)
     frame_count = len(judgement_results)
     frame_ids = [int(frame.get("frame_id", idx + 1)) for idx, frame in enumerate(judgement_results)]
@@ -543,7 +546,7 @@ def run_learnable_smplify(config: dict) -> None:
                 out_dict = {}
                 for kp in map_data["keypoints"]:
                     coord = joints_world[kp["regressor_index"]]
-                    out_dict[kp["name"]] = [round(float(c), 5) for c in coord]
+                    out_dict[kp["name"]] = [float(c) for c in coord]
                 
                 keypoints_output[frame_idx][camera_name] = out_dict
                 metadata_output[frame_idx].setdefault("learnable_smplify", {})[camera_name] = _metadata_for_frame(result, frame_idx)
@@ -557,7 +560,7 @@ def run_learnable_smplify(config: dict) -> None:
     write_json(output_dir / "metadata.json", metadata)
 
     for i in range(frame_count):
-        out_name = f"learnable_frame_{frame_ids[i]}.json"
+        out_name = f"{LEARNABLE_FILE_PREFIX}{frame_ids[i]}.json"
         write_json(output_dir / "keypoints3d" / out_name, keypoints_output[i])
         metadata_data = {
             k: v for k, v in metadata_output[i].items()
@@ -565,4 +568,4 @@ def run_learnable_smplify(config: dict) -> None:
         }
         write_json(output_dir / "metadata" / out_name, metadata_data)
 
-    log_done(str(output_dir))
+    print(f"[Learnable] Done. Output: {output_dir}")

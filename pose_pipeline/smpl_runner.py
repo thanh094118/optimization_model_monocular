@@ -13,8 +13,6 @@ def create_smpl_model(model_path):
         str(model_path),
         model_type="smpl",
         batch_size=1,
-        use_pca=False,
-        flat_hand_mean=True,
         gender="neutral",
     ).eval()
 
@@ -22,8 +20,7 @@ def create_smpl_model(model_path):
 def get_3d_joints_for_frame(model, person_data, frame_idx, regressor_path, map_path):
     pose = person_data["pose"][frame_idx:frame_idx + 1]
     trans = person_data["trans"][frame_idx:frame_idx + 1]
-    betas = person_data["betas"]
-    curr_betas = betas[frame_idx:frame_idx + 1] if len(betas) == len(person_data["pose"]) else betas
+    curr_betas = person_data["betas"][frame_idx:frame_idx + 1]
 
     curr_pose_t = torch.tensor(np.ascontiguousarray(pose), dtype=torch.float32)
     curr_trans_t = torch.tensor(np.ascontiguousarray(trans), dtype=torch.float32)
@@ -48,5 +45,5 @@ def get_3d_joints_for_frame(model, person_data, frame_idx, regressor_path, map_p
     result = {}
     for kp in map_data["keypoints"]:
         x, y, z = joints_all[kp["regressor_index"]]
-        result[kp["name"]] = [round(float(x), 5), round(float(y), 5), round(float(z), 5)]
+        result[kp["name"]] = [float(x), float(y), float(z)]
     return result

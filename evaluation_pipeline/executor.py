@@ -10,9 +10,8 @@ import numpy as np
 from scipy.spatial import procrustes
 
 from keypoints_map import load_keypoints3d_map
-from evaluation_pipeline.logs import log_disabled, log_done
-
-MODULES = ["posed", "fused", "learnable", "optimized"]
+from config_loader import resolve_inputs
+MODULES = ["posed", "fused", "learnable"]
 CAMERAS = ["camera1", "camera2"]
 CAMERA_FILE_NAMES = {
     "camera1": "cam1",
@@ -95,29 +94,30 @@ def _load_frame_map(frame_dir: Path, frame_offset: int = 0) -> dict[int, Path]:
     return frame_map
 
 
-def _filter_frame_map_by_range(frame_map: dict[int, Path], start_frame: Optional[int], end_frame: Optional[int]) -> dict[int, Path]:
-    if start_frame is None and end_frame is None:
-        return frame_map
-    filtered = {}
-    for frame_idx, path in frame_map.items():
-        if start_frame is not None and frame_idx < start_frame:
-            continue
-        if end_frame is not None and frame_idx > end_frame:
-            continue
-        filtered[frame_idx] = path
-    return filtered
+def _format_frame_sample(frames: set[int], limit: int = 8) -> str:
+    if not frames:
+        return "[]"
+    ordered = sorted(frames)
+    if len(ordered) <= limit:
+        return str(ordered)
+    head = ", ".join(str(n) for n in ordered[:limit])
+    return f"[{head}, ...] (total={len(ordered)})"
 
 
-def _resolve_selected_frame_window(config: dict) -> tuple[Optional[int], Optional[int]]:
-    runtime_cfg = config.get("runtime", {})
-    preprocess_cfg = config.get("preprocess", {})
-
-    start_frame = runtime_cfg.get("selected_frame_start", preprocess_cfg.get("start_frame"))
-    end_frame = runtime_cfg.get("selected_frame_end", preprocess_cfg.get("end_frame"))
-
-    start_frame = None if start_frame in (None, "") else int(start_frame)
-    end_frame = None if end_frame in (None, "") else int(end_frame)
-    return start_frame, end_frame
+def _warn_frame_mismatch(module_name: str, truth_frames: set[int], module_frames: set[int]) -> None:
+    extra_truth = truth_frames - module_frames
+    extra_module = module_frames - truth_frames
+    if not extra_truth and not extra_module:
+        return
+    print(
+        f"[Evaluation] Frame mismatch in {module_name}: "
+        f"truth={len(truth_frames)}, module={len(module_frames)}, "
+        f"overlap={len(truth_frames & module_frames)}"
+    )
+    if extra_truth:
+        print(f"[Evaluation]   GT-only frames: {_format_frame_sample(extra_truth)}")
+    if extra_module:
+        print(f"[Evaluation]   Output-only frames: {_format_frame_sample(extra_module)}")
 
 
 def _resolve_truth_frame_payload(truth_data: dict, testcase_name: Optional[str], truth_path: Path) -> dict:
@@ -147,19 +147,31 @@ def _resolve_truth_frame_payload(truth_data: dict, testcase_name: Optional[str],
 def run_evaluation(config: dict) -> None:
     eval_cfg = config.get("evaluation", {})
     if not eval_cfg.get("enabled", True):
-        log_disabled()
+        print("[Evaluation] Disabled by config: evaluation.enabled=false")
         return
 
     paths = config["paths"]
+    inputs = resolve_inputs(config)
     map_data = load_keypoints3d_map(paths["keypoints3d_map"])
     canonical_names = set([k["name"] for k in map_data["keypoints"]])
     priority1_names = map_data.get("priority1", [])
     priority2_names = map_data.get("priority2", [])
 
-    truth_dir = Path(eval_cfg.get("ground_truth_dir", "input/gtruth_results"))
+    truth_dir = Path(inputs.get("ground_truth_dir", eval_cfg.get("ground_truth_dir", "input/gtruth_results")))
     out_dir = Path(paths.get("evaluation_output_dir", "output/evaluation_results"))
-    testcase_name = eval_cfg.get("testcase_name", "testcase1")
-    start_frame, end_frame = _resolve_selected_frame_window(config)
+    testcase_name = eval_cfg.get("testcase_name")
+    if testcase_name in ("", None):
+        testcase_name = None
+
+    metrics_cfg = eval_cfg.get("metrics", {})
+    metric_enabled = {
+        "MPJPE": bool(metrics_cfg.get("mpjpe", False)),
+        "PA-MPJPE": bool(metrics_cfg.get("pa_mpjpe", True)),
+        "PCK": bool(metrics_cfg.get("pck", False)),
+    }
+    enabled_metrics = [name for name, enabled in metric_enabled.items() if enabled]
+    if not enabled_metrics:
+        raise ValueError("At least one evaluation metric must be enabled")
 
     if config.get("runtime", {}).get("clean_output", True):
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -172,7 +184,6 @@ def run_evaluation(config: dict) -> None:
         "posed": Path(paths["pose_output_dir"]) / "keypoints3d",
         "fused": Path(paths["fused_output_dir"]) / "keypoints3d",
         "learnable": Path(paths["learnable_output_dir"]) / "keypoints3d",
-        "optimized": Path(paths["optimized_output_dir"]) / "keypoints3d",
     }
 
     for name, mdir in module_dirs.items():
@@ -180,31 +191,48 @@ def run_evaluation(config: dict) -> None:
             raise FileNotFoundError(f"Missing required module directory: {mdir}")
 
     truth_frame_map = _load_frame_map(truth_dir, frame_offset=1)
-    truth_frame_map = _filter_frame_map_by_range(truth_frame_map, start_frame, end_frame)
     if not truth_frame_map:
         raise ValueError(f"No ground truth frames found in {truth_dir}")
 
     gt_camera_keys = {
-        "camera1": _camera_key_from_video_path(paths.get("camera1_video")),
-        "camera2": _camera_key_from_video_path(paths.get("camera2_video")),
+        "camera1": _camera_key_from_video_path(inputs.get("camera1_video")),
+        "camera2": _camera_key_from_video_path(inputs.get("camera2_video")),
     }
+
+    module_frame_maps = {}
+    module_frame_sets = {}
+    for name, mdir in module_dirs.items():
+        module_frame_maps[name] = _load_frame_map(mdir)
+        module_frame_sets[name] = set(module_frame_maps[name])
 
     truth_frames = set(truth_frame_map)
-    module_frame_maps = {}
-    for name, mdir in module_dirs.items():
-        module_frame_maps[name] = _filter_frame_map_by_range(_load_frame_map(mdir), start_frame, end_frame)
-        mframes = set(module_frame_maps[name])
-        if mframes != truth_frames:
-            raise ValueError(f"Frame mismatch in module {name}. Expected {sorted(truth_frames)}, got {sorted(mframes)}")
+    common_frames = truth_frames.copy()
+    for frames_set in module_frame_sets.values():
+        common_frames &= frames_set
 
-    frames = sorted(truth_frames)
+    if not common_frames:
+        details = ", ".join(
+            f"{name}={len(frames_set)}" for name, frames_set in module_frame_sets.items()
+        )
+        raise ValueError(
+            f"No overlapping frames between ground truth and module outputs. "
+            f"truth={len(truth_frames)}, {details}"
+        )
+
+    for name, frames_set in module_frame_sets.items():
+        _warn_frame_mismatch(name, truth_frames, frames_set)
+
+    dropped_truth = truth_frames - common_frames
+    if dropped_truth:
+        print(
+            "[Evaluation] Restricting evaluation to overlapping frames only. "
+            f"Dropping {len(dropped_truth)} GT-only frames."
+        )
+
+    frames = sorted(common_frames)
     
     # metrics: metric -> cam -> frame -> module -> priority -> value
-    results = {
-        "MPJPE": {"camera1": {}, "camera2": {}},
-        "PA-MPJPE": {"camera1": {}, "camera2": {}},
-        "PCK": {"camera1": {}, "camera2": {}},
-    }
+    results = {metric: {"camera1": {}, "camera2": {}} for metric in enabled_metrics}
 
     for frame in frames:
         truth_path = truth_frame_map[frame]
@@ -239,26 +267,27 @@ def run_evaluation(config: dict) -> None:
                 
                 # compute metrics
                 # MPJPE
-                results["MPJPE"][cam][frame].setdefault(mod, {})
-                results["MPJPE"][cam][frame][mod]["priority1_mm"] = _compute_mpjpe(pred_joints, truth_joints, priority1_names)
-                results["MPJPE"][cam][frame][mod]["priority2_mm"] = _compute_mpjpe(pred_joints, truth_joints, priority2_names)
+                if metric_enabled["MPJPE"]:
+                    results["MPJPE"][cam][frame].setdefault(mod, {})
+                    results["MPJPE"][cam][frame][mod]["priority1_mm"] = _compute_mpjpe(pred_joints, truth_joints, priority1_names)
+                    results["MPJPE"][cam][frame][mod]["priority2_mm"] = _compute_mpjpe(pred_joints, truth_joints, priority2_names)
                 
-                # PA-MPJPE
-                results["PA-MPJPE"][cam][frame].setdefault(mod, {})
-                results["PA-MPJPE"][cam][frame][mod]["priority1_mm"] = _compute_pa_mpjpe(pred_joints, truth_joints, priority1_names)
-                results["PA-MPJPE"][cam][frame][mod]["priority2_mm"] = _compute_pa_mpjpe(pred_joints, truth_joints, priority2_names)
+                if metric_enabled["PA-MPJPE"]:
+                    results["PA-MPJPE"][cam][frame].setdefault(mod, {})
+                    results["PA-MPJPE"][cam][frame][mod]["priority1_mm"] = _compute_pa_mpjpe(pred_joints, truth_joints, priority1_names)
+                    results["PA-MPJPE"][cam][frame][mod]["priority2_mm"] = _compute_pa_mpjpe(pred_joints, truth_joints, priority2_names)
                 
-                # PCK-mm
-                results["PCK"][cam][frame].setdefault(mod, {})
-                results["PCK"][cam][frame][mod]["priority1_mm"] = _compute_pck_mm(pred_joints, truth_joints, priority1_names)
-                results["PCK"][cam][frame][mod]["priority2_mm"] = _compute_pck_mm(pred_joints, truth_joints, priority2_names)
+                if metric_enabled["PCK"]:
+                    results["PCK"][cam][frame].setdefault(mod, {})
+                    results["PCK"][cam][frame][mod]["priority1_mm"] = _compute_pck_mm(pred_joints, truth_joints, priority1_names)
+                    results["PCK"][cam][frame][mod]["priority2_mm"] = _compute_pck_mm(pred_joints, truth_joints, priority2_names)
 
     header = ["Frame"]
     for mod in MODULES:
         header.append(f"{mod}_priority1_mm")
         header.append(f"{mod}_priority2_mm")
 
-    for metric in ["MPJPE", "PA-MPJPE", "PCK"]:
+    for metric in enabled_metrics:
         for cam in CAMERAS:
             filename = f"{metric}_{CAMERA_FILE_NAMES[cam]}.csv"
             out_file = out_dir / filename
@@ -286,4 +315,4 @@ def run_evaluation(config: dict) -> None:
                     avg_row.append(f"{(avg_sums[h]/n_frames):.2f}")
                 writer.writerow(avg_row)
 
-    log_done(str(out_dir))
+    print(f"[Evaluation] Done. Output: {out_dir}")

@@ -2,6 +2,7 @@ from pathlib import Path
 import re
 import copy
 import joblib
+import numpy as np
 from json_io import read_json, write_json
 from keypoints_map import load_keypoints3d_map
 from fusion_pipeline.config import OUTPUT_SUBDIRS
@@ -19,7 +20,8 @@ from fusion_pipeline.detector import (
     make_raw_judgement_fallback,
 )
 from fusion_pipeline.optimization import calculate_stats, optimize_f_points
-from fusion_pipeline.logs import log_disabled, log_done, log_occlusion
+from preprocess_pipeline.calib import resolve_selected_intrinsics
+from config_loader import resolve_inputs
 
 
 def _frame_index(path: Path) -> int:
@@ -117,6 +119,13 @@ def _load_2d_profiles(config: dict) -> dict:
     }
 
 
+def _load_occlusion_intrinsics(config: dict) -> dict:
+    return {
+        "camera1": np.asarray(resolve_selected_intrinsics(config, "cam1"), dtype=float),
+        "camera2": np.asarray(resolve_selected_intrinsics(config, "cam2"), dtype=float),
+    }
+
+
 def _frame_confidence_from_profile(profile, source_idx, frame_idx: int):
     if not profile:
         return None
@@ -143,6 +152,7 @@ def run_phase3_pipeline(
     data_in,
     map_path,
     verts_by_cam=None,
+    intrinsics_by_cam=None,
     occlusion_tau=0.05,
     regularization=False,
     regularization_lambda=1.0,
@@ -152,8 +162,6 @@ def run_phase3_pipeline(
     ransac_max_combos=500,
     frame_idx=None,
     prev_optimized_data=None,
-    debug1_dir=None,
-    debug2_dir=None,
     confidence2d_by_cam=None,
 ):
     cam1 = {k: as_xyz(v) for k, v in data_in["camera1"].items()}
@@ -170,8 +178,10 @@ def run_phase3_pipeline(
     cam2 = {k: cam2[k] for k in names}
 
     if verts_by_cam is not None:
-        vis1 = compute_visibility_from_mesh_vertices(cam1, verts_by_cam["camera1"], occlusion_tau)
-        vis2 = compute_visibility_from_mesh_vertices(cam2, verts_by_cam["camera2"], occlusion_tau)
+        if intrinsics_by_cam is None:
+            raise ValueError("intrinsics_by_cam is required when verts_by_cam is provided")
+        vis1 = compute_visibility_from_mesh_vertices(cam1, verts_by_cam["camera1"], intrinsics_by_cam["camera1"], occlusion_tau)
+        vis2 = compute_visibility_from_mesh_vertices(cam2, verts_by_cam["camera2"], intrinsics_by_cam["camera2"], occlusion_tau)
     else:
         vis1 = {n: True for n in names}
         vis2 = {n: True for n in names}
@@ -203,9 +213,6 @@ def run_phase3_pipeline(
     )
 
     cam1_corr, cam2_corr = apply_confidence_corrections(cam1, cam2, k1_set, k2_set, t12, t21)
-    if debug1_dir is not None:
-        write_json(debug1_dir / "fused_data_{}.json".format(frame_idx), {"camera1": {k: list(v) for k, v in cam1_corr.items()}, "camera2": {k: list(v) for k, v in cam2_corr.items()}})
-
     cam1_corr, cam2_corr = apply_rotation_mismatch_corrections(
         cam1_corr,
         cam2_corr,
@@ -219,8 +226,6 @@ def run_phase3_pipeline(
         t12,
         t21,
     )
-    if debug2_dir is not None:
-        write_json(debug2_dir / "fused_data_{}.json".format(frame_idx), {"camera1": {k: list(v) for k, v in cam1_corr.items()}, "camera2": {k: list(v) for k, v in cam2_corr.items()}})
 
     a_new = sorted(set(a_list) | k1_set | k2_set)
     f_list = [n for n in names if n not in set(a_new)]
@@ -264,43 +269,33 @@ def run_phase3_pipeline(
 
 def run_fusion(config: dict) -> None:
     paths = config["paths"]
+    inputs = resolve_inputs(config)
     runtime_cfg = config.get("runtime", {})
     fusion_cfg = config.get("fusion", {})
 
     if not fusion_cfg.get("enabled", True):
-        log_disabled()
+        print("[Fusion] Disabled by config: fusion.enabled=false")
         return
 
     input_dir = Path(paths["pose_output_dir"])
     output_dir = Path(paths["fused_output_dir"])
-
-    debug_cfg = fusion_cfg.get("debug", {})
-    debug1_dir = (output_dir / "debug1") if debug_cfg.get("save_debug1", True) else None
-    debug2_dir = (output_dir / "debug2") if debug_cfg.get("save_debug2", False) else None
 
     if not input_dir.exists():
         raise FileNotFoundError(f"Pose JSON directory not found: {input_dir}")
 
     if runtime_cfg.get("clean_output", True):
         _clean_output(output_dir, "fused_data_*.json", create_split_dirs=True)
-        if debug1_dir is not None:
-            _clean_output(debug1_dir, "fused_data_*.json")
-        if debug2_dir is not None:
-            _clean_output(debug2_dir, "fused_data_*.json")
     else:
         output_dir.mkdir(parents=True, exist_ok=True)
-        if debug1_dir is not None:
-            debug1_dir.mkdir(parents=True, exist_ok=True)
-        if debug2_dir is not None:
-            debug2_dir.mkdir(parents=True, exist_ok=True)
 
     occlusion_cfg = fusion_cfg.get("occlusion", {})
     occlusion_enabled = occlusion_cfg.get("enabled", True)
     if occlusion_enabled:
         load_torso_mask(paths.get("segmentation"))
 
-    wham_loaded, verts_cam1, verts_cam2, n_frames_1, n_frames_2 = _load_verts_if_available(paths, occlusion_enabled)
+    wham_loaded, verts_cam1, verts_cam2, n_frames_1, n_frames_2 = _load_verts_if_available(inputs, occlusion_enabled)
     confidence2d_profiles = _load_2d_profiles(config)
+    occlusion_intrinsics = _load_occlusion_intrinsics(config) if occlusion_enabled and wham_loaded else None
 
     keypoints_dir = input_dir / "keypoints3d"
     metadata_dir = input_dir / "metadata"
@@ -337,6 +332,7 @@ def run_fusion(config: dict) -> None:
                 data,
                 map_path=paths["keypoints3d_map"],
                 verts_by_cam=verts_input,
+                intrinsics_by_cam=occlusion_intrinsics,
                 occlusion_tau=occlusion_cfg.get("tau", 0.01),
                 regularization=opt_cfg.get("regularization", True),
                 regularization_lambda=opt_cfg.get("regularization_lambda", 1.0),
@@ -346,8 +342,6 @@ def run_fusion(config: dict) -> None:
                 ransac_max_combos=ransac_cfg.get("max_combos", 500),
                 frame_idx=frame_idx,
                 prev_optimized_data=prev_opt,
-                debug1_dir=debug1_dir,
-                debug2_dir=debug2_dir,
                 confidence2d_by_cam=confidence2d_by_cam,
             )
             occluded_keys = sorted(
@@ -357,7 +351,8 @@ def run_fusion(config: dict) -> None:
                     if (not result.get("vis1", {}).get(name, True)) or (not result.get("vis2", {}).get(name, True))
                 }
             )
-            log_occlusion(frame_idx=frame_idx, occluded_keys=occluded_keys)
+            if occluded_keys:
+                print(f"[Fusion] Frame {frame_idx}: Occlusion: {', '.join(occluded_keys)}")
             prev_result = result
         except Exception as e:
             print(f"[Fusion] Frame {frame_idx}: FAILED ({e}) -> fallback")
@@ -371,8 +366,4 @@ def run_fusion(config: dict) -> None:
         write_json(output_dir / "keypoints3d" / out_name, fused_keypoints)
         write_json(output_dir / "metadata" / out_name, fused_metadata)
 
-    log_done(str(output_dir))
-    if debug1_dir is not None:
-        print(f"[Fusion] Debug1: {debug1_dir}")
-    if debug2_dir is not None:
-        print(f"[Fusion] Debug2: {debug2_dir}")
+    print(f"[Fusion] Done. Output: {output_dir}")

@@ -3,6 +3,7 @@ outputs/
 inputs/
 input/
 a/
+output/
 # conversation_cache/
 *.md
 __pycache__/

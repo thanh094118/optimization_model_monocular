@@ -3,11 +3,12 @@ from pathlib import Path
 import joblib
 import numpy as np
 
+from config_loader import resolve_inputs
 from pose_pipeline.smpl_runner import create_smpl_model, get_3d_joints_for_frame
-from pose_pipeline.config import POSE_OUTPUT_SUBDIRS
-from pose_pipeline.logs import log_disabled, log_done, log_using_offset
 from json_io import write_json
 from preprocess_pipeline.calib import resolve_selected_offset_from_camera_profile
+
+POSE_OUTPUT_SUBDIRS = ("keypoints3d", "metadata")
 
 
 def _extract_person_payload(data):
@@ -67,22 +68,6 @@ def _resolve_tracking_frame_ids(person_data):
     return frame_ids.tolist()
 
 
-def _resolve_selected_frame_window(config: dict, synced_total_frames: int) -> tuple[int, int]:
-    runtime_cfg = config.get("runtime", {})
-    preprocess_cfg = config.get("preprocess", {})
-
-    start_frame = runtime_cfg.get("selected_frame_start", preprocess_cfg.get("start_frame"))
-    end_frame = runtime_cfg.get("selected_frame_end", preprocess_cfg.get("end_frame"))
-
-    selected_start = 1 if start_frame in (None, "") else max(1, int(start_frame))
-    selected_end = synced_total_frames if end_frame in (None, "") else min(synced_total_frames, int(end_frame))
-    if selected_end < selected_start:
-        raise ValueError(
-            f"Invalid preprocess frame range for pose export: start_frame={selected_start}, end_frame={selected_end}, synced_total_frames={synced_total_frames}"
-        )
-    return selected_start, selected_end
-
-
 def _clean_pose_output(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     for old_json in output_dir.glob("pose_data_*.json"):
@@ -96,19 +81,19 @@ def _clean_pose_output(output_dir: Path) -> None:
 
 def run_pose_export(config: dict) -> None:
     paths = config["paths"]
-    runtime_cfg = config.get("runtime", {})
+    inputs = resolve_inputs(config)
     pose_cfg = config.get("pose_export", {})
 
     if not pose_cfg.get("enabled", True):
-        log_disabled()
+        print("[Pose] Disabled by config: pose_export.enabled=false")
         return
 
-    cam1_file = Path(paths["cam1_pkl"])
-    cam2_file = Path(paths["cam2_pkl"])
+    cam1_file = Path(inputs["cam1_pkl"])
+    cam2_file = Path(inputs["cam2_pkl"])
     smpl_model_path = Path(paths["smpl_model"])
     output_dir = Path(paths["pose_output_dir"])
 
-    if runtime_cfg.get("clean_output", True):
+    if config.get("runtime", {}).get("clean_output", True):
         _clean_pose_output(output_dir)
     else:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -123,28 +108,23 @@ def run_pose_export(config: dict) -> None:
     cam1_tracking_frame_ids = _resolve_tracking_frame_ids(cam1_data)
     cam2_tracking_frame_ids = _resolve_tracking_frame_ids(cam2_data)
 
-    offset, method, _ = resolve_selected_offset_from_camera_profile(config)
+    offset, _ = resolve_selected_offset_from_camera_profile(config)
     cam1_start = max(0, -offset)
     cam2_start = max(0, offset)
     synced_total_frames = max(0, min(len(cam1_data["pose"]) - cam1_start, len(cam2_data["pose"]) - cam2_start))
 
-    selected_start, selected_end = _resolve_selected_frame_window(config, synced_total_frames)
-    min_frames = max(0, selected_end - selected_start + 1)
-    cam1_start = cam1_start + selected_start - 1
-    cam2_start = cam2_start + selected_start - 1
+    min_frames = synced_total_frames
     sync_result = {
         "offset": offset,
         "left_start": cam1_start,
         "right_start": cam2_start,
         "frame_count": min_frames,
-        "method": method,
-        "selected_frame_range": [selected_start, selected_end],
     }
 
     print(f"[Pose] Cam1 frames: {len(cam1_data['pose'])}")
     print(f"[Pose] Cam2 frames: {len(cam2_data['pose'])}")
-    print(f"[Pose] Selected frame window: {selected_start}..{selected_end} ({min_frames} frames)")
-    log_using_offset(offset=offset, method=method)
+    print(f"[Pose] Exporting full synced range: {min_frames} frames")
+    print(f"[Pose] Using offset={offset}")
     print(f"[Pose] Exporting {min_frames} pose JSON files...")
 
     j_regressor_path = paths.get("j_regressor_3d", "models/J_regressor_body25_plus_palm27.npy")
@@ -153,7 +133,7 @@ def run_pose_export(config: dict) -> None:
     cam2_export_data = slice_person_frames(cam2_data, cam2_start, min_frames)
 
     for i in range(min_frames):
-        out_frame_id = selected_start + i
+        out_frame_id = i + 1
         keypoints3d_data = {
             "camera1": get_3d_joints_for_frame(model, cam1_export_data, i, j_regressor_path, paths["keypoints3d_map"]),
             "camera2": get_3d_joints_for_frame(model, cam2_export_data, i, j_regressor_path, paths["keypoints3d_map"]),
@@ -174,4 +154,4 @@ def run_pose_export(config: dict) -> None:
         if (i + 1) % 50 == 0 or (i + 1) == min_frames:
             print(f"[Pose] Saved pose_data_{out_frame_id}.json ({i + 1}/{min_frames})")
 
-    log_done(str(output_dir))
+    print(f"[Pose] Done. Output: {output_dir}")

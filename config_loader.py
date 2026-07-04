@@ -3,17 +3,32 @@ import yaml
 
 
 ALLOWED_STAGES = {
-    "all",
-    "all_vis",
-    "preprocess",
-    "pose",
-    "fusion",
-    "learnable",
-    "optimization",
     "visualization",
     "evaluation",
-    "refinement",
 }
+
+INPUT_KEYS = (
+    "cam1_pkl",
+    "cam2_pkl",
+    "camera1_video",
+    "camera2_video",
+    "ground_truth_dir",
+)
+
+DEFAULT_EVALUATION_METRICS = {
+    "pa_mpjpe": True,
+    "mpjpe": False,
+    "pck": False,
+}
+
+
+def resolve_inputs(config):
+    inputs = dict(config.get("inputs") or {})
+    paths = config.get("paths", {})
+    for key in INPUT_KEYS:
+        if key not in inputs and key in paths:
+            inputs[key] = paths[key]
+    return inputs
 
 
 def load_config(config_path):
@@ -24,6 +39,11 @@ def load_config(config_path):
 
     with path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
+
+    evaluation_cfg = config.setdefault("evaluation", {})
+    metrics_cfg = evaluation_cfg.setdefault("metrics", {})
+    for key, value in DEFAULT_EVALUATION_METRICS.items():
+        metrics_cfg.setdefault(key, value)
 
     validate_config(config)
     return config
@@ -36,7 +56,7 @@ def validate_config(config):
     if "paths" not in config:
         raise ValueError("Missing config section: paths")
 
-    stage = config.get("runtime", {}).get("stage", "all")
+    stage = config.get("runtime", {}).get("stage", "visualization")
     if stage not in ALLOWED_STAGES:
         raise ValueError(
             "Invalid runtime.stage={!r}. Allowed: {}".format(
@@ -45,10 +65,9 @@ def validate_config(config):
         )
 
     paths = config["paths"]
+    inputs = resolve_inputs(config)
 
     required_paths = [
-        "cam1_pkl",
-        "cam2_pkl",
         "smpl_model",
         "keypoints3d_map",
         "keypoints2d_map",
@@ -57,25 +76,14 @@ def validate_config(config):
         "pose_output_dir",
         "fused_output_dir",
         "learnable_output_dir",
-        "optimized_output_dir",
         "visualization_output_dir",
-        "refinement_output_dir",
+        "evaluation_output_dir",
     ]
 
     for key in required_paths:
         if key not in paths:
             raise ValueError("Missing config path: paths.{}".format(key))
 
-    if "refinement" in config:
-        required_refinement = [
-            "data_dir",
-            "wham_file",
-            "video",
-            "intrinsics",
-            "subject_params",
-            "parameters_yaml",
-        ]
-
-        for key in required_refinement:
-            if key not in config["refinement"]:
-                raise ValueError("Missing config key: refinement.{}".format(key))
+    for key in INPUT_KEYS:
+        if key not in inputs or not inputs[key]:
+            raise ValueError("Missing config input: inputs.{}".format(key))

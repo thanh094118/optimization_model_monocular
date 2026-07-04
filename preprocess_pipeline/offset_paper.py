@@ -109,7 +109,7 @@ def compute_offset_from_pkls(
     j_regressor_path,
     map_path,
     verbose=False,
-    max_frames: Optional[int] = 100,
+    max_frames: Optional[int] = None,
 ):
     cam1_data = load_pkl_data(str(pkl1_path))
     cam2_data = load_pkl_data(str(pkl2_path))
@@ -130,8 +130,6 @@ def compute_offset_from_pkls(
         smpl_model_path,
         model_type="smpl",
         batch_size=max(1, t),
-        use_pca=False,
-        flat_hand_mean=True,
         gender="neutral",
     ).eval()
     seq1 = build_canonical_sequence(get_canonical_joints_3d(model, cam1_data, j_regressor_path, map_path))

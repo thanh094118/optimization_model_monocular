@@ -1,1 +1,0 @@
-"""Single WHAM optimization pipeline."""
