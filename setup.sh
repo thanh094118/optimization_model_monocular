@@ -41,7 +41,6 @@ import scipy
 import loguru
 import decouple
 import kornia
-import slahmr
 
 print("Import OK")
 EOF
