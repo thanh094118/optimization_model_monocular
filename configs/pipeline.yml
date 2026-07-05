@@ -8,11 +8,11 @@ preprocess:
     max_frames: null
 
 inputs:
-  cam1_pkl: "input/testcase4/wham_opencap_1.pkl"
-  cam2_pkl: "input/testcase4/wham_opencap_2.pkl"
-  camera1_video: "input/testcase4/video_1.mp4"
-  camera2_video: "input/testcase4/video_2.mp4"
-  ground_truth_dir: "input/testcase4/gtruth_results"
+  cam1_pkl: "input/testcase1/wham_opencap_1.pkl"
+  cam2_pkl: "input/testcase1/wham_opencap_2.pkl"
+  camera1_video: "input/testcase1/video_1.mp4"
+  camera2_video: "input/testcase1/video_2.mp4"
+  ground_truth_dir: "input/testcase1/gtruth_results"
 
 paths:
   smpl_model: "models/SMPL_NEUTRAL.pkl"

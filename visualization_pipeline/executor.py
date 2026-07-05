@@ -7,7 +7,6 @@ import json
 import os
 import re
 import csv
-from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
@@ -599,7 +598,6 @@ def run_visualization(config: dict) -> None:
     target_fps = int(vis_cfg.get("target_fps", 10))
     dpi = int(vis_cfg.get("dpi", 100))
     cameras = vis_cfg.get("cameras", ["camera1", "camera2"])
-    timestamp = datetime.now().strftime("%y%m%d_%H%M")
     video_map = get_video_map(config)
 
     print(f"[Visualization] Fusion frames: {len(fusion_poses)}")
@@ -610,7 +608,7 @@ def run_visualization(config: dict) -> None:
 
     for camera_name in cameras:
         print(f"[Visualization] Processing {camera_name}")
-        output_video = output_dir / f"compare_{camera_name}_fusion_video_learnable_{timestamp}.mp4"
+        output_video = output_dir / f"compare_{camera_name}_fuse_vid_learn.mp4"
         create_comparison_animation(
             camera_name=camera_name,
             fusion_poses=fusion_poses,
@@ -625,7 +623,7 @@ def run_visualization(config: dict) -> None:
         )
 
     for camera_name in cameras:
-        output_video = output_dir / f"project_{camera_name}_pose_fusion_learnable_{timestamp}.mp4"
+        output_video = output_dir / f"project_{camera_name}_pose_fusion_learnable.mp4"
         create_project2d_animation(
             camera_name=camera_name,
             config=config,
