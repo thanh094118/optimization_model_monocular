@@ -55,7 +55,7 @@ echo "========================================"
 mkdir -p archives
 
 declare -A ZIP_FILE_IDS=(
-    ["input.zip"]="19SVgxS_vn4HoB8K66nSGSw3VOTHt4hUh"
+    ["input.zip"]="1LNV0o0clGRiq490mgTa6c5eOhb_wa9ws"
     ["models.zip"]="1oVFBNtVLBH2mV1jLazWC5Tud2-PxJtlo"
 )
 
