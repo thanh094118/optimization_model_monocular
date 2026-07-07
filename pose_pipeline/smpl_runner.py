@@ -1,4 +1,6 @@
 from pathlib import Path
+from contextlib import redirect_stdout, redirect_stderr
+import io
 import numpy as np
 import torch
 import smplx
@@ -9,12 +11,15 @@ def create_smpl_model(model_path):
     model_path = Path(model_path)
     if not model_path.exists():
         raise FileNotFoundError("SMPL model not found: {}".format(model_path))
-    return smplx.create(
-        str(model_path),
-        model_type="smpl",
-        batch_size=1,
-        gender="neutral",
-    ).eval()
+    sink = io.StringIO()
+    with redirect_stdout(sink), redirect_stderr(sink):
+        model = smplx.create(
+            str(model_path),
+            model_type="smpl",
+            batch_size=1,
+            gender="neutral",
+        )
+    return model.eval()
 
 
 def get_3d_joints_for_frame(model, person_data, frame_idx, regressor_path, map_path):

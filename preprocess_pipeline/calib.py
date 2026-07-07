@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 
 from json_io import read_json, write_json
+from config_loader import resolve_preprocess_output_dir
 from config_loader import resolve_inputs
 
 
@@ -65,7 +66,7 @@ def _estimate_intrinsics(video_path: Path) -> list[list[float]]:
 
 
 def export_camera_jsons(config: dict, offset: int) -> None:
-    output_dir = Path(config.get("preprocess", {}).get("output_dir", "output/preprocess_results"))
+    output_dir = Path(resolve_preprocess_output_dir(config))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     inputs = resolve_inputs(config)
@@ -111,7 +112,7 @@ def export_camera_jsons(config: dict, offset: int) -> None:
 
 
 def load_camera_profile(config: dict, cam_id: str) -> dict:
-    output_dir = Path(config.get("preprocess", {}).get("output_dir", "output/preprocess_results"))
+    output_dir = Path(resolve_preprocess_output_dir(config))
     path = output_dir / f"data_{cam_id}.json"
     if not path.exists():
         raise FileNotFoundError(f"Camera profile not found: {path}")

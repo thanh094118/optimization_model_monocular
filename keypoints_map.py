@@ -1,4 +1,3 @@
-import json
 from functools import lru_cache
 from pathlib import Path
 import yaml
@@ -68,24 +67,3 @@ def load_keypoints2d_map(path_str: str) -> dict:
             raise ValueError(f"Unexpected key in 2D map: {name}")
             
     return map_2d
-
-@lru_cache(maxsize=1)
-def load_mapping_3dto2d(path_str: str) -> dict:
-    path = Path(path_str)
-    if not path.exists():
-        raise FileNotFoundError(f"3D to 2D mapping file not found: {path}")
-    with path.open("r", encoding="utf-8") as f:
-        mapping = json.load(f)
-    
-    if len(mapping) != 21:
-        raise ValueError(f"Expected exactly 21 mapping entries, got {len(mapping)}")
-    
-    for k, v in mapping.items():
-        if k not in EXPECTED_NAMES:
-            raise ValueError(f"Unexpected key in mapping: {k}")
-        if v not in EXPECTED_NAMES:
-            raise ValueError(f"Unexpected value in mapping: {v}")
-        if k != v:
-            raise ValueError(f"Mapping must be identity, got {k} -> {v}")
-            
-    return mapping

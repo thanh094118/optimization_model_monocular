@@ -1,56 +1,56 @@
 runtime:
+  # Chế độ chạy hiện tại của pipeline.
+  # - visualization: chạy full chuỗi preprocess -> evaluation -> visualization.
+  # - evaluation: chỉ kiểm tra và chạy evaluation trên output đã có sẵn.
   stage: visualization
-  clean_output: true
+  clean_output: true # xóa file output cũ trước khi ghi mới.
 
 preprocess:
-  output_dir: "output/preprocess_results"
   offset_estimation:
-    max_frames: null
+    max_frames: null # Số frame tối đa dùng cho ước lượng offset.
 
 inputs:
-  cam1_pkl: "input/testcase1/wham_opencap_1.pkl"
-  cam2_pkl: "input/testcase1/wham_opencap_2.pkl"
-  camera1_video: "input/testcase1/video_1.mp4"
-  camera2_video: "input/testcase1/video_2.mp4"
-  ground_truth_dir: "input/testcase1/gtruth_results"
+  cam1_pkl: "input/testcase3/wham_opencap_1.pkl"
+  cam2_pkl: "input/testcase3/wham_opencap_2.pkl"
+  camera1_video: "input/testcase3/video_1.mp4"
+  camera2_video: "input/testcase3/video_2.mp4"
+  ground_truth_dir: "input/testcase3/gtruth_results" # Thư mục ground-truth cho evaluation.
 
 paths:
   smpl_model: "models/SMPL_NEUTRAL.pkl"
   segmentation: "models/smpl_partSegmentation_mapping.pkl"
   keypoints3d_map: "configs/keypoints3D_map.yml"
   keypoints2d_map: "configs/keypoints2D_map.yml"
-  mapping_3dto2d: "configs/mapping_3dto2d.json"
   j_regressor_3d: "models/J_regressor_body25_plus_palm27.npy"
 
+  preprocess_output_dir: "output/preprocess_results"
   pose_output_dir: "output/pose_results"
   fused_output_dir: "output/fused_results"
   learnable_output_dir: "output/learnable_results"
   visualization_output_dir: "output/visualize_results"
   evaluation_output_dir: "output/evaluation_results"
 
-pose_export:
-  enabled: true
-  target_fps: 60
-  max_sync_offset: 40
-  min_overlap: 8
-  min_improvement_ratio: 0.05
-
 fusion:
   enabled: true
+  belief:
+    alpha: 0.001 # alpha: hệ số phạt theo khoảng cách 3D của joint, càng lớn thì joint xa camera càng bị giảm tin cậy mạnh hơn.
+    beta: 0.8 # beta: hệ số trộn tin cậy của láng giềng xương trong harmonic mean, càng lớn thì belief càng chịu ảnh hưởng bởi skeleton lân cận.
 
   occlusion:
     enabled: true
-    tau: 0.01
+    tau: 0.01 # Ngưỡng khoảng cách z để kết luận joint bị che khuất.
 
+  # Cấu hình RANSAC dùng để ước lượng similarity transform giữa 2 camera.
   ransac:
-    threshold: 0.05
-    max_combos: 500
+    threshold: 0.05 # Ngưỡng sai khác để coi một joint là inlier.
+    max_combos: 500 # Số tổ hợp mẫu tối đa khi không thể liệt kê toàn bộ triplet.
 
+  # Cấu hình tối ưu hóa cho nhóm điểm F trong fusion.
   optimization:
     regularization: true
-    regularization_lambda: 1.0
-    temporal_lambda: 2.0
-    max_iter: 1000
+    regularization_lambda: 1.0 # Hệ số phạt của proximity regularization.
+    temporal_lambda: 2.0 # Hệ số phạt theo thời gian so với frame trước.
+    max_iter: 1000 # Số vòng lặp tối đa cho bộ giải SLSQP.
 
 learnable:
   enabled: true
@@ -58,18 +58,18 @@ learnable:
 
 visualization:
   enabled: true
-  target_fps: 10
-  dpi: 100
-  max_frames: null
-  video_search_dir: "."
+  target_fps: 10 # FPS của video render.
+  dpi: 100 # DPI của figure matplotlib.
+  max_frames: null # Giới hạn số frame render, null nghĩa là render hết frame có thể ghép.
+  # Danh sách camera cần render.
   cameras:
     - camera1
     - camera2
 
 evaluation:
   enabled: true
-  testcase_name: null
+  testcase_name: null #đánh giá testcase hay dataset
   metrics:
-    pa_mpjpe: true
+    pa_mpjpe: true # PA-MPJPE là metric mặc định đang bật.
     mpjpe: false
     pck: false

@@ -436,7 +436,7 @@ def run_learnable_smplify(config: dict) -> None:
     runtime_cfg = config.get("runtime", {})
     learnable_cfg = copy.deepcopy(config.get("learnable_smplify") or config.get("learnable", {}))
 
-    if not learnable_cfg.get("enabled", True):
+    if not learnable_cfg["enabled"]:
         print("[Learnable] Disabled by config: learnable_smplify.enabled=false")
         return
 
@@ -445,22 +445,18 @@ def run_learnable_smplify(config: dict) -> None:
     cam1_pkl = Path(inputs["cam1_pkl"])
     cam2_pkl = Path(inputs["cam2_pkl"])
 
-    j_regressor_3d_path = paths.get("j_regressor_3d", "models/J_regressor_body25_plus_palm27.npy")
+    j_regressor_3d_path = paths["j_regressor_3d"]
 
     repo_root = Path(__file__).resolve().parent
     learnable_cfg.setdefault("repo_src", str(repo_root / "Learnable-SMPLify" / "src"))
     learnable_cfg.setdefault("net_config", str(repo_root / "Learnable-SMPLify" / "src" / "config" / "net.yaml"))
     learnable_cfg.setdefault("smpl_family_dir", "models")
     learnable_cfg.setdefault("j_regressor_body25", "models/J_regressor_body25.npy")
-    learnable_cfg.setdefault("smpl_neutral_path", paths.get("smpl_model"))
-    if "checkpoint" not in learnable_cfg:
-        legacy_ckpt = config.get("learnable", {}).get("checkpoint")
-        if legacy_ckpt:
-            learnable_cfg["checkpoint"] = legacy_ckpt
-        else:
-            learnable_cfg["checkpoint"] = "models/best_ckpt.pth.tar"
+    learnable_cfg["smpl_neutral_path"] = paths["smpl_model"]
+    if "checkpoint" not in learnable_cfg or not learnable_cfg["checkpoint"]:
+        raise ValueError("Missing config parameter: learnable.checkpoint")
 
-    if runtime_cfg.get("clean_output", True):
+    if runtime_cfg["clean_output"]:
         _clean_output(output_dir)
     else:
         output_dir.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,6 @@
 from collections import Counter
+from contextlib import redirect_stdout, redirect_stderr
+import io
 from typing import Optional
 
 import joblib
@@ -126,12 +128,14 @@ def compute_offset_from_pkls(
         "pose": cam2_data["pose"][:t],
         "betas": cam2_data["betas"][:t] if np.asarray(cam2_data["betas"]).ndim > 1 else cam2_data["betas"],
     }
-    model = smplx.create(
-        smpl_model_path,
-        model_type="smpl",
-        batch_size=max(1, t),
-        gender="neutral",
-    ).eval()
+    sink = io.StringIO()
+    with redirect_stdout(sink), redirect_stderr(sink):
+        model = smplx.create(
+            smpl_model_path,
+            model_type="smpl",
+            batch_size=max(1, t),
+            gender="neutral",
+        ).eval()
     seq1 = build_canonical_sequence(get_canonical_joints_3d(model, cam1_data, j_regressor_path, map_path))
     seq2 = build_canonical_sequence(get_canonical_joints_3d(model, cam2_data, j_regressor_path, map_path))
     return int(dtw_mode_offset(seq1, seq2))

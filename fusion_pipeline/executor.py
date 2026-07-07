@@ -21,7 +21,7 @@ from fusion_pipeline.detector import (
 )
 from fusion_pipeline.optimization import calculate_stats, optimize_f_points
 from preprocess_pipeline.calib import resolve_selected_intrinsics
-from config_loader import resolve_inputs
+from config_loader import resolve_inputs, resolve_preprocess_output_dir
 
 
 def _frame_index(path: Path) -> int:
@@ -65,16 +65,16 @@ def _load_verts_if_available(paths: dict, occlusion_enabled: bool):
 
     wham_path_1 = Path(paths["cam1_pkl"])
     wham_path_2 = Path(paths["cam2_pkl"])
-    if not (wham_path_1.exists() and wham_path_2.exists()):
-        print("[Fusion] WARNING: WHAM PKL files not found. Occlusion disabled.")
-        return False, None, None, 0, 0
+    if not wham_path_1.exists():
+        raise FileNotFoundError(f"WHAM PKL file not found: {wham_path_1}")
+    if not wham_path_2.exists():
+        raise FileNotFoundError(f"WHAM PKL file not found: {wham_path_2}")
 
     person_1 = _extract_person_payload(joblib.load(wham_path_1))
     person_2 = _extract_person_payload(joblib.load(wham_path_2))
 
     if person_1 is None or person_2 is None or "verts_cam" not in person_1 or "verts_cam" not in person_2:
-        print("[Fusion] WARNING: verts_cam not found. Occlusion disabled.")
-        return False, None, None, 0, 0
+        raise ValueError("verts_cam not found in WHAM PKL inputs; fusion.occlusion.enabled requires verts_cam")
 
     verts_cam1 = person_1["verts_cam"]
     verts_cam2 = person_2["verts_cam"]
@@ -95,7 +95,7 @@ def _load_pose_frame(path: Path, metadata_dir: Path):
 
 
 def _load_2d_profile(config: dict, cam_id: str):
-    preprocess_dir = Path(config.get("preprocess", {}).get("output_dir", "output/preprocess_results"))
+    preprocess_dir = Path(resolve_preprocess_output_dir(config))
     profile_path = preprocess_dir / f"data_{cam_id}.json"
     if not profile_path.exists():
         print(f"[Fusion] 2D confidence not found: {profile_path}")
@@ -151,15 +151,17 @@ def _confidence2d_for_frame(data: dict, frame_idx: int, profiles: dict) -> dict:
 def run_phase3_pipeline(
     data_in,
     map_path,
+    occlusion_tau,
+    regularization,
+    regularization_lambda,
+    temporal_lambda,
+    max_iter,
+    ransac_threshold,
+    ransac_max_combos,
+    belief_alpha,
+    belief_beta,
     verts_by_cam=None,
     intrinsics_by_cam=None,
-    occlusion_tau=0.05,
-    regularization=False,
-    regularization_lambda=1.0,
-    temporal_lambda=2.0,
-    max_iter=1000,
-    ransac_threshold=0.05,
-    ransac_max_combos=500,
     frame_idx=None,
     prev_optimized_data=None,
     confidence2d_by_cam=None,
@@ -187,6 +189,8 @@ def run_phase3_pipeline(
         vis2 = {n: True for n in names}
 
     confidence2d_by_cam = confidence2d_by_cam or {}
+    if belief_alpha is None or belief_beta is None:
+        raise ValueError("fusion.belief.alpha and fusion.belief.beta must be provided in config")
     detected = detect_cross_view_errors(
         cam1,
         cam2,
@@ -195,6 +199,8 @@ def run_phase3_pipeline(
         vis2,
         confidence2d1=confidence2d_by_cam.get("camera1"),
         confidence2d2=confidence2d_by_cam.get("camera2"),
+        alpha=belief_alpha,
+        beta=belief_beta,
     )
     m_set = detected["M"]
     k1_set = detected["K1"]
@@ -273,7 +279,7 @@ def run_fusion(config: dict) -> None:
     runtime_cfg = config.get("runtime", {})
     fusion_cfg = config.get("fusion", {})
 
-    if not fusion_cfg.get("enabled", True):
+    if not fusion_cfg["enabled"]:
         print("[Fusion] Disabled by config: fusion.enabled=false")
         return
 
@@ -288,10 +294,11 @@ def run_fusion(config: dict) -> None:
     else:
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    occlusion_cfg = fusion_cfg.get("occlusion", {})
-    occlusion_enabled = occlusion_cfg.get("enabled", True)
+    occlusion_cfg = fusion_cfg["occlusion"]
+    belief_cfg = fusion_cfg["belief"]
+    occlusion_enabled = occlusion_cfg["enabled"]
     if occlusion_enabled:
-        load_torso_mask(paths.get("segmentation"))
+        load_torso_mask(paths["segmentation"])
 
     wham_loaded, verts_cam1, verts_cam2, n_frames_1, n_frames_2 = _load_verts_if_available(inputs, occlusion_enabled)
     confidence2d_profiles = _load_2d_profiles(config)
@@ -306,8 +313,8 @@ def run_fusion(config: dict) -> None:
     file_paths = sorted(keypoints_dir.glob("pose_data_*.json"), key=_frame_index)
     print(f"[Fusion] Found {len(file_paths)} pose JSON files")
 
-    ransac_cfg = fusion_cfg.get("ransac", {})
-    opt_cfg = fusion_cfg.get("optimization", {})
+    ransac_cfg = fusion_cfg["ransac"]
+    opt_cfg = fusion_cfg["optimization"]
 
     prev_result = None
     for path in file_paths:
@@ -333,26 +340,28 @@ def run_fusion(config: dict) -> None:
                 map_path=paths["keypoints3d_map"],
                 verts_by_cam=verts_input,
                 intrinsics_by_cam=occlusion_intrinsics,
-                occlusion_tau=occlusion_cfg.get("tau", 0.01),
-                regularization=opt_cfg.get("regularization", True),
-                regularization_lambda=opt_cfg.get("regularization_lambda", 1.0),
-                temporal_lambda=opt_cfg.get("temporal_lambda", 2.0),
-                max_iter=opt_cfg.get("max_iter", 1000),
-                ransac_threshold=ransac_cfg.get("threshold", 0.05),
-                ransac_max_combos=ransac_cfg.get("max_combos", 500),
+                occlusion_tau=occlusion_cfg["tau"],
+                regularization=opt_cfg["regularization"],
+                regularization_lambda=opt_cfg["regularization_lambda"],
+                temporal_lambda=opt_cfg["temporal_lambda"],
+                max_iter=opt_cfg["max_iter"],
+                ransac_threshold=ransac_cfg["threshold"],
+                ransac_max_combos=ransac_cfg["max_combos"],
                 frame_idx=frame_idx,
                 prev_optimized_data=prev_opt,
                 confidence2d_by_cam=confidence2d_by_cam,
+                belief_alpha=belief_cfg["alpha"],
+                belief_beta=belief_cfg["beta"],
             )
-            occluded_keys = sorted(
-                {
-                    name
-                    for name in set(result.get("vis1", {})) | set(result.get("vis2", {}))
-                    if (not result.get("vis1", {}).get(name, True)) or (not result.get("vis2", {}).get(name, True))
-                }
-            )
-            if occluded_keys:
-                print(f"[Fusion] Frame {frame_idx}: Occlusion: {', '.join(occluded_keys)}")
+            occluded_cam1 = sorted(name for name, visible in result.get("vis1", {}).items() if not visible)
+            occluded_cam2 = sorted(name for name, visible in result.get("vis2", {}).items() if not visible)
+            occlusion_parts = []
+            if occluded_cam1:
+                occlusion_parts.append(f"cam1: {', '.join(occluded_cam1)}")
+            if occluded_cam2:
+                occlusion_parts.append(f"cam2: {', '.join(occluded_cam2)}")
+            if occlusion_parts:
+                print(f"[Fusion] Frame {frame_idx}: Occlusion: {' | '.join(occlusion_parts)}")
             prev_result = result
         except Exception as e:
             print(f"[Fusion] Frame {frame_idx}: FAILED ({e}) -> fallback")

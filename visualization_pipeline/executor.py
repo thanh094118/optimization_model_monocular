@@ -14,8 +14,6 @@ import cv2
 import matplotlib
 import numpy as np
 from preprocess_pipeline.calib import resolve_selected_intrinsics
-from config_loader import resolve_inputs
-
 # Use non-interactive backend so the phase works from normal Python CLI.
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -138,42 +136,30 @@ def _resolve_video_path(path_value):
 
 
 def get_video_map(config: dict) -> dict[str, str]:
-    """Resolve camera videos from YAML. If omitted, fallback to MP4 files in video_search_dir/current dir."""
-    vis_cfg = config.get("visualization", {})
-    inputs = resolve_inputs(config)
+    """Resolve required camera videos from `inputs` only."""
+    inputs = dict(config.get("inputs") or {})
 
+    missing = []
     video_map = {}
-    cam1_video = _resolve_video_path(inputs.get("camera1_video"))
-    cam2_video = _resolve_video_path(inputs.get("camera2_video"))
 
-    if cam1_video:
-        video_map["camera1"] = cam1_video
-    if cam2_video:
-        video_map["camera2"] = cam2_video
+    for camera_name, input_key in (("camera1", "camera1_video"), ("camera2", "camera2_video")):
+        path_value = inputs.get(input_key)
+        if not path_value:
+            missing.append(f"inputs.{input_key}")
+            continue
+        resolved = _resolve_video_path(path_value)
+        if resolved is None:
+            raise FileNotFoundError(f"Visualization video not found: {path_value}")
+        video_map[camera_name] = resolved
 
-    if video_map:
-        print(f"[Visualization] Video map from config: {video_map}")
-        return video_map
+    if missing:
+        raise ValueError(
+            "Visualization requires both camera video inputs. Missing: {}".format(
+                ", ".join(missing)
+            )
+        )
 
-    search_dir = Path(vis_cfg.get("video_search_dir", "."))
-    mp4_files = sorted(
-        glob.glob(str(search_dir / "*.mp4")),
-        key=lambda x: int(re.search(r"(\d+)\.mp4$", x).group(1))
-        if re.search(r"(\d+)\.mp4$", x)
-        else float("inf"),
-    )
-
-    if len(mp4_files) >= 2:
-        video_map["camera1"] = mp4_files[0]
-        video_map["camera2"] = mp4_files[1]
-    elif len(mp4_files) == 1:
-        video_map["camera1"] = mp4_files[0]
-        video_map["camera2"] = mp4_files[0]
-
-    if video_map:
-        print(f"[Visualization] Video map auto-detected: {video_map}")
-    else:
-        print("[Visualization] No MP4 video found. Video column will be blank.")
+    print(f"[Visualization] Video map from config: {video_map}")
     return video_map
 
 
@@ -564,15 +550,15 @@ def run_visualization(config: dict) -> None:
     paths = config.get("paths", {})
     vis_cfg = config.get("visualization", {})
 
-    if not vis_cfg.get("enabled", True):
+    if not vis_cfg["enabled"]:
         print("[Visualization] Disabled by config: visualization.enabled=false")
         return
 
     fused_dir = Path(paths["fused_output_dir"])
     learnable_dir = Path(paths["learnable_output_dir"])
-    output_dir = Path(paths.get("visualization_output_dir", "output/visualization"))
+    output_dir = Path(paths["visualization_output_dir"])
 
-    if runtime_cfg.get("clean_output", True):
+    if runtime_cfg["clean_output"]:
         _clean_output(output_dir)
     else:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -587,7 +573,7 @@ def run_visualization(config: dict) -> None:
     if frame_count == 0:
         raise ValueError("No frames to visualize. Check fused_jsons and learnable_results.")
 
-    max_frames = vis_cfg.get("max_frames")
+    max_frames = vis_cfg["max_frames"]
     if max_frames is not None:
         frame_count = min(frame_count, int(max_frames))
 
@@ -595,9 +581,9 @@ def run_visualization(config: dict) -> None:
     learnable_poses = learnable_poses[:frame_count]
     frame_ids = [frame.get("frame_id", idx + 1) for idx, frame in enumerate(fusion_poses)]
 
-    target_fps = int(vis_cfg.get("target_fps", 10))
-    dpi = int(vis_cfg.get("dpi", 100))
-    cameras = vis_cfg.get("cameras", ["camera1", "camera2"])
+    target_fps = int(vis_cfg["target_fps"])
+    dpi = int(vis_cfg["dpi"])
+    cameras = vis_cfg["cameras"]
     video_map = get_video_map(config)
 
     print(f"[Visualization] Fusion frames: {len(fusion_poses)}")

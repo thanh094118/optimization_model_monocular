@@ -10,7 +10,7 @@ import yaml
 
 from keypoints_map import load_keypoints2d_map
 import json_io
-from config_loader import resolve_inputs
+from config_loader import resolve_inputs, resolve_preprocess_output_dir
 
 def _to_numpy(value):
     if hasattr(value, "detach"):
@@ -96,7 +96,7 @@ def _build_2d_camera_payload(tracking: dict, keypoints2d_map: dict[str, object])
 
 
 def export_tracking_2d_to_camera_profiles(config: dict) -> None:
-    output_dir = Path(config.get("preprocess", {}).get("output_dir", "output/preprocess_results"))
+    output_dir = Path(resolve_preprocess_output_dir(config))
     paths = config.get("paths", {})
     inputs = resolve_inputs(config)
     pkl_by_cam = {

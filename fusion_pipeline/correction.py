@@ -2,7 +2,6 @@ from itertools import combinations
 
 import numpy as np
 
-from fusion_pipeline.config import RANSAC_MAX_COMBOS, RANSAC_THRESHOLD
 from fusion_pipeline.detector import as_xyz
 
 
@@ -35,7 +34,7 @@ def apply_similarity(point, transform):
     return scale * (r @ as_xyz(point)) + t
 
 
-def ransac_umeyama(cam1, cam2, names, threshold=RANSAC_THRESHOLD, max_combos=RANSAC_MAX_COMBOS, rng=None):
+def ransac_umeyama(cam1, cam2, names, threshold, max_combos, rng=None):
     if len(names) < 3:
         return (1.0, np.eye(3), np.zeros(3)), list(names)
     src_all, dst_all = _to_arrays(cam1, cam2, names)
@@ -63,7 +62,7 @@ def ransac_umeyama(cam1, cam2, names, threshold=RANSAC_THRESHOLD, max_combos=RAN
     return tf_refined, inlier_names
 
 
-def estimate_bidirectional_similarity(cam1, cam2, candidate_names, threshold=RANSAC_THRESHOLD, max_combos=RANSAC_MAX_COMBOS):
+def estimate_bidirectional_similarity(cam1, cam2, candidate_names, threshold, max_combos):
     t12, anchor_names = ransac_umeyama(cam1, cam2, candidate_names, threshold=threshold, max_combos=max_combos)
     if len(anchor_names) >= 3:
         src_21 = np.array([cam2[n] for n in anchor_names], dtype=float)

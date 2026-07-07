@@ -9,17 +9,13 @@ from pathlib import Path
 from os.path import join
 from typing import Optional
 
-from preprocess_pipeline.config import (
-    DEFAULT_OUTPUT_DIR,
-    DEFAULT_SMPL_MODEL_PATH,
-)
 from preprocess_pipeline.calib import export_camera_jsons, resolve_selected_offset_from_camera_profile
 from preprocess_pipeline.extract_2d import export_tracking_2d_to_camera_profiles
 from preprocess_pipeline.logs import log_module_done, log_module_start, log_offset_selected
 from preprocess_pipeline.offset_paper import (
     compute_offset_from_pkls as compute_paper_offset,
 )
-from config_loader import resolve_inputs
+from config_loader import resolve_inputs, resolve_preprocess_output_dir
 
 EXTENSIONS = [".mp4", ".MP4", ".avi", ".AVI"]
 
@@ -147,8 +143,8 @@ def run_offset_estimation(
 
 
 def run_preprocess(config: dict, extract_frames: bool = True) -> tuple[int, str]:
-    output_dir = config.get("preprocess", {}).get("output_dir", DEFAULT_OUTPUT_DIR)
-    smpl_model_path = config.get("preprocess", {}).get("smpl_model_path", DEFAULT_SMPL_MODEL_PATH)
+    output_dir = resolve_preprocess_output_dir(config)
+    smpl_model_path = config["paths"]["smpl_model"]
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -159,11 +155,11 @@ def run_preprocess(config: dict, extract_frames: bool = True) -> tuple[int, str]
     cam2_pkl = inputs["cam2_pkl"]
     cam1_video = inputs["camera1_video"]
     cam2_video = inputs["camera2_video"]
-    if config.get("runtime", {}).get("clean_output", True):
+    if config["runtime"]["clean_output"]:
         _clean_preprocess_output(output_dir, [cam1_video, cam2_video], clean_images=extract_frames)
 
     log_module_start(output_dir=output_dir)
-    if extract_frames and config.get("runtime", {}).get("clean_output", True):
+    if extract_frames and config["runtime"]["clean_output"]:
         _clean_extracted_images(output_dir)
     max_frames = config.get("preprocess", {}).get("offset_estimation", {}).get("max_frames")
     if max_frames in (None, ""):

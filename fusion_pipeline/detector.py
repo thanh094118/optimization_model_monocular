@@ -6,13 +6,9 @@ from scipy.spatial import ConvexHull
 
 from fusion_pipeline.config import (
     CONFIDENCE_DELTA_CAP,
-    HARMONIC_ALPHA,
-    HARMONIC_BETA,
     HARMONIC_EPSILON,
     NON_REPLACEABLE_ANCHORS,
     OCCLUSION_CHECK_JOINTS,
-    OCCLUSION_IMAGE_HEIGHT,
-    OCCLUSION_IMAGE_WIDTH,
     OCCLUSION_NEIGHBORS,
     ORIENTATION_EPSILON,
     RIGID_BONES_RATIO,
@@ -64,14 +60,10 @@ def get_orientation_flag(joints, epsilon=ORIENTATION_EPSILON):
 def load_torso_mask(seg_path):
     global _TORSO_MASK
     if not seg_path:
-        print("[Fusion] WARNING: segmentation path not configured. Occlusion disabled.")
-        _TORSO_MASK = None
-        return None
+        raise ValueError("Missing required fusion occlusion input: paths.segmentation")
     seg_path = Path(seg_path)
     if not seg_path.exists():
-        print("[Fusion] WARNING: {} not found. Occlusion disabled.".format(seg_path))
-        _TORSO_MASK = None
-        return None
+        raise FileNotFoundError(f"Segmentation mask file not found: {seg_path}")
     with seg_path.open("rb") as f:
         seg = pickle.load(f, encoding="latin1")
     _TORSO_MASK = np.isin(seg["smpl_index"], list(TORSO_PART_IDS))
@@ -156,8 +148,8 @@ def compute_harmonic_precision(
     joint_names,
     vis1,
     vis2,
-    alpha=HARMONIC_ALPHA,
-    beta=HARMONIC_BETA,
+    alpha,
+    beta,
     epsilon=HARMONIC_EPSILON,
 ):
     neighbors = {}
@@ -223,7 +215,17 @@ def _blend_detector_confidences(joint_names, base_confidences, external_confiden
     }
 
 
-def detect_cross_view_errors(cam1, cam2, names, vis1, vis2, confidence2d1=None, confidence2d2=None):
+def detect_cross_view_errors(
+    cam1,
+    cam2,
+    names,
+    vis1,
+    vis2,
+    alpha,
+    beta,
+    confidence2d1=None,
+    confidence2d2=None,
+):
     flags1 = get_orientation_flag(cam1)
     flags2 = get_orientation_flag(cam2)
     m_set = {
@@ -233,7 +235,7 @@ def detect_cross_view_errors(cam1, cam2, names, vis1, vis2, confidence2d1=None, 
         or (flags1.get(n, 0) == -1 and flags2.get(n, 0) == 1)
     }
 
-    _, H1_old, H2_old = compute_harmonic_precision(cam1, cam2, names, vis1, vis2)
+    _, H1_old, H2_old = compute_harmonic_precision(cam1, cam2, names, vis1, vis2, alpha=alpha, beta=beta)
     H1_all = _blend_detector_confidences(names, H1_old, confidence2d1)
     H2_all = _blend_detector_confidences(names, H2_old, confidence2d2)
     all_weights = {name: (H1_all[name] + H2_all[name]) / 2.0 for name in names}

@@ -146,7 +146,7 @@ def _resolve_truth_frame_payload(truth_data: dict, testcase_name: Optional[str],
 
 def run_evaluation(config: dict) -> None:
     eval_cfg = config.get("evaluation", {})
-    if not eval_cfg.get("enabled", True):
+    if not eval_cfg["enabled"]:
         print("[Evaluation] Disabled by config: evaluation.enabled=false")
         return
 
@@ -157,17 +157,22 @@ def run_evaluation(config: dict) -> None:
     priority1_names = map_data.get("priority1", [])
     priority2_names = map_data.get("priority2", [])
 
-    truth_dir = Path(inputs.get("ground_truth_dir", eval_cfg.get("ground_truth_dir", "input/gtruth_results")))
-    out_dir = Path(paths.get("evaluation_output_dir", "output/evaluation_results"))
+    truth_dir = Path(inputs["ground_truth_dir"])
+    out_dir = Path(paths["evaluation_output_dir"])
     testcase_name = eval_cfg.get("testcase_name")
     if testcase_name in ("", None):
         testcase_name = None
 
-    metrics_cfg = eval_cfg.get("metrics", {})
+    metrics_cfg = eval_cfg.get("metrics")
+    if not isinstance(metrics_cfg, dict):
+        raise ValueError("Missing config section: evaluation.metrics")
+    for key in ("pa_mpjpe", "mpjpe", "pck"):
+        if key not in metrics_cfg or metrics_cfg[key] is None:
+            raise ValueError(f"Missing config evaluation metric flag: evaluation.metrics.{key}")
     metric_enabled = {
-        "MPJPE": bool(metrics_cfg.get("mpjpe", False)),
-        "PA-MPJPE": bool(metrics_cfg.get("pa_mpjpe", True)),
-        "PCK": bool(metrics_cfg.get("pck", False)),
+        "MPJPE": bool(metrics_cfg["mpjpe"]),
+        "PA-MPJPE": bool(metrics_cfg["pa_mpjpe"]),
+        "PCK": bool(metrics_cfg["pck"]),
     }
     enabled_metrics = [name for name, enabled in metric_enabled.items() if enabled]
     if not enabled_metrics:
